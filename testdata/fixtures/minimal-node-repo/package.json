@@ -1,0 +1,12 @@
+{
+  "name": "minimal-node-repo",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.21.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

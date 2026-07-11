@@ -1,0 +1,20 @@
+{
+  "name": "axicontext-oss",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OSS foundation for AxiContext.",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-server --filter @latticeag/axicontext-sdk -r build",
+    "test": "vitest run",
+    "typecheck": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-server --filter @latticeag/axicontext-sdk -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.15",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
