@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "description": "AxiContext command line interface.",
   "type": "module",
-  "main": "dist/axi-bin.js",
-  "types": "dist/axi-bin.d.ts",
+  "main": "dist/bin.js",
+  "types": "dist/bin.d.ts",
   "bin": {
-    "axictx": "dist/axi-bin.js"
+    "axictx": "dist/bin.js"
   },
   "files": [
     "dist"
@@ -16,13 +16,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/axi-bin.js",
+    "start": "node dist/bin.js",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@latticeag/axicontext-core": "workspace:*",
-    "@latticeag/axicontext-server": "workspace:*",
     "commander": "^14.0.0"
   }
 }

@@ -8,13 +8,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-server --filter @latticeag/axicontext-sdk -r build",
-    "test": "vitest run",
-    "typecheck": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-server --filter @latticeag/axicontext-sdk -r typecheck"
+    "build": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-sdk -r build",
+    "test": "pnpm --filter @latticeag/axicontext-core test",
+    "typecheck": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-sdk -r typecheck"
   },
   "devDependencies": {
-    "@types/node": "^24.0.15",
-    "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }

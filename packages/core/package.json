@@ -1,14 +1,14 @@
 {
   "name": "@latticeag/axicontext-core",
   "version": "0.1.0",
-  "description": "AxiContext core context and drift engine",
+  "description": "AxiContext core types, config, and scaffolding.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -22,5 +22,8 @@
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "zod": "^3.25.76"
+  }
 }

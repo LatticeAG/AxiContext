@@ -1,86 +1,114 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileExists, safeReadText } from "./fs-utils.js";
-import type { AxiConfig } from "./types.js";
+import TOML from "@iarna/toml";
+import { z } from "zod";
+import { AXICONTEXT_DIR, CONFIG_FILE_NAME } from "./constants.js";
+import type { AxiConfig, AxiContextConfig } from "./types.js";
 
-const DEFAULT_CONFIG: AxiConfig = {
-  serve: {
-    host: "127.0.0.1",
-    port: 8787,
-    api_token: ""
-  },
-  query: {
-    max_tokens_default: 4000
+const driftSeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+
+const axiContextConfigSchema = z.object({
+  schema_version: z.string().min(1),
+  project: z.object({
+    name: z.string(),
+    default_branch: z.string().min(1),
+  }),
+  project_context: z.object({
+    path: z.string().min(1),
+    commit: z.boolean(),
+    max_chars: z.number().int().positive(),
+  }),
+  serve: z.object({
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+  }),
+  drift: z.object({
+    fail_on: z.array(driftSeveritySchema).nonempty(),
+  }),
+  adapters: z.object({
+    git: z.object({
+      enabled: z.boolean(),
+    }),
+    github_issues: z.object({
+      enabled: z.boolean(),
+    }),
+  }),
+});
+
+export class ConfigValidationError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = "ConfigValidationError";
   }
-};
-
-function parseTomlSections(raw: string): Record<string, Record<string, string>> {
-  const sections: Record<string, Record<string, string>> = {};
-  let currentSection = "root";
-  sections[currentSection] = {};
-  const lines = raw.split(/\r?\n/);
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const sectionMatch = trimmed.match(/^\[(.+)]$/);
-    if (sectionMatch) {
-      currentSection = sectionMatch[1].trim();
-      sections[currentSection] ??= {};
-      continue;
-    }
-
-    const keyValueMatch = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.+)$/);
-    if (!keyValueMatch) {
-      continue;
-    }
-
-    const key = keyValueMatch[1].trim();
-    let value = keyValueMatch[2].trim();
-    if (
-      (value.startsWith("\"") && value.endsWith("\"")) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    sections[currentSection][key] = value;
-  }
-
-  return sections;
 }
 
-function parseNumber(input: string | undefined, fallback: number): number {
-  if (!input) {
-    return fallback;
+export function parseAxiContextConfigToml(rawToml: string): AxiContextConfig {
+  let parsed: unknown;
+  try {
+    parsed = TOML.parse(rawToml);
+  } catch (error) {
+    throw new ConfigValidationError("Unable to parse TOML configuration.", error);
   }
-  const parsed = Number(input);
-  return Number.isFinite(parsed) ? parsed : fallback;
+
+  const result = axiContextConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new ConfigValidationError(
+      `Configuration schema validation failed: ${result.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ")}`,
+      result.error,
+    );
+  }
+
+  return result.data;
 }
 
-export async function loadAxiConfig(repoPath: string): Promise<AxiConfig> {
-  const configPath = path.join(repoPath, ".axicontext", "config.toml");
-  if (!(await fileExists(configPath))) {
-    return DEFAULT_CONFIG;
+export function getAxiContextConfigPath(repoRoot = process.cwd()): string {
+  return path.join(repoRoot, AXICONTEXT_DIR, CONFIG_FILE_NAME);
+}
+
+export async function loadAxiContextConfig(repoRoot = process.cwd()): Promise<AxiContextConfig> {
+  const configPath = getAxiContextConfigPath(repoRoot);
+  let rawToml: string;
+
+  try {
+    rawToml = await readFile(configPath, "utf8");
+  } catch (error) {
+    throw new ConfigValidationError(`Unable to read config file at ${configPath}.`, error);
   }
 
-  const raw = await safeReadText(configPath);
-  const sections = parseTomlSections(raw);
-  const serve = sections.serve ?? {};
-  const query = sections.query ?? {};
+  return parseAxiContextConfigToml(rawToml);
+}
+
+export async function loadAxiConfig(repoRoot = process.cwd()): Promise<AxiConfig> {
+  let parsed: AxiContextConfig | null = null;
+  try {
+    parsed = await loadAxiContextConfig(repoRoot);
+  } catch {
+    parsed = null;
+  }
+
+  if (!parsed) {
+    return {
+      serve: {
+        host: "127.0.0.1",
+        port: 8787,
+        api_token: "",
+      },
+      query: {
+        max_tokens_default: 4000,
+      },
+    };
+  }
 
   return {
     serve: {
-      host: serve.host ?? DEFAULT_CONFIG.serve.host,
-      port: parseNumber(serve.port, DEFAULT_CONFIG.serve.port),
-      api_token: serve.api_token ?? DEFAULT_CONFIG.serve.api_token
+      host: parsed.serve.host,
+      port: parsed.serve.port,
+      api_token: "",
     },
     query: {
-      max_tokens_default: parseNumber(
-        query.max_tokens_default,
-        DEFAULT_CONFIG.query.max_tokens_default
-      )
-    }
+      max_tokens_default: 4000,
+    },
   };
 }

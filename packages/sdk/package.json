@@ -8,7 +8,7 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -23,7 +23,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@latticeag/axicontext-core": "workspace:*",
-    "@latticeag/axicontext-server": "workspace:*"
+    "@latticeag/axicontext-core": "workspace:*"
   }
 }
