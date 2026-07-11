@@ -1,0 +1,20 @@
+{
+  "name": "axicontext-oss",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OSS foundation for AxiContext.",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @latticeag/axicontext-core test && vitest run --config vitest.graph.config.ts && vitest run",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

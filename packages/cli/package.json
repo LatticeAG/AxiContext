@@ -1,0 +1,28 @@
+{
+  "name": "@latticeag/axicontext",
+  "version": "0.1.0",
+  "description": "AxiContext command line interface.",
+  "type": "module",
+  "main": "dist/axictx-cli.js",
+  "types": "dist/axictx-cli.d.ts",
+  "bin": {
+    "axictx": "dist/axictx-cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/axictx-cli.js",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@latticeag/axicontext-core": "workspace:*",
+    "@latticeag/axicontext-server": "workspace:*",
+    "commander": "^14.0.0"
+  }
+}

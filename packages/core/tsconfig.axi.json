@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/axi-index.ts", "src/client.ts", "src/config.ts", "src/constants.ts", "src/init.ts", "src/types.ts"]
+}
