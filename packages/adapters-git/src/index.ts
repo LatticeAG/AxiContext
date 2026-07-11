@@ -6,7 +6,14 @@ import { execFile as execFileCallback } from "node:child_process";
 
 import fg from "fast-glob";
 
-import type { AdapterResult, GraphEdge, GraphNode, IngestContext, RepoContext, SourceAdapter } from "../../core/src/types.js";
+import type {
+  AdapterResult,
+  GraphEdge,
+  GraphNode,
+  IngestContext,
+  RepoContext,
+  SourceAdapter,
+} from "./types.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -488,7 +495,7 @@ async function buildTreeSummary(repoRoot: string, maxDepth: number, warnings: st
       return;
     }
     const absoluteDir = path.join(repoRoot, relativeDir);
-    let entries: Awaited<ReturnType<typeof readdir>>;
+    let entries: import("node:fs").Dirent[];
     try {
       entries = await readdir(absoluteDir, { withFileTypes: true });
     } catch (error) {

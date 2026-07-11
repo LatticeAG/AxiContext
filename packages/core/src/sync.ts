@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { GitSourceAdapter } from "../../adapters-git/src/index.js";
+import { GitSourceAdapter } from "@latticeag/axicontext-adapter-git";
 
 import { GraphStore } from "./graph-store.js";
 import { generateProjectContext } from "./project-context.js";

@@ -30,5 +30,7 @@ export const GITIGNORE_SUGGESTIONS = [
 export enum ExitCode {
   Ok = 0,
   Error = 1,
+  Drift = 2,
   Config = 3,
+  Adapter = 4,
 }

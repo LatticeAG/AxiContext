@@ -8,9 +8,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-sdk -r build",
-    "test": "pnpm --filter @latticeag/axicontext-core test",
-    "typecheck": "pnpm --filter @latticeag/axicontext-core --filter @latticeag/axicontext --filter @latticeag/axicontext-sdk -r typecheck"
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @latticeag/axicontext-core test && vitest run --config vitest.graph.config.ts && vitest run",
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

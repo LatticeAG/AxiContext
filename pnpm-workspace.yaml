@@ -3,3 +3,4 @@ packages:
   - "packages/cli"
   - "packages/sdk"
   - "packages/server"
+  - "packages/adapters-git"

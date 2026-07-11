@@ -1,493 +1,607 @@
-# AxiContext — Product & Technical Specification
+# AxiContext — OSS Implementation Specification
 
 **Series:** Axi (context / memory) — LatticeAG  
 **Product:** AxiContext  
-**Working title alternatives:** AxiCtx, Axi Memory, Project Context Controller  
-**Pattern (decision):** **Hybrid — OSS-first open-core + invite-only hosted SaaS**  
-**License (OSS layer):** MIT  
-**Status:** Specification / pre-MVP — planning only (no implementation yet)  
-**Version:** 0.2.0-draft  
+**Scope (locked):** **OSS Phase 1 only** — MIT CLI, SDK, local graph, adapters, Agent Read API  
+**SaaS / hosted sync:** Deferred to Phase 2 (see Appendix F)  
+**License:** MIT  
+**Status:** In active OSS implementation (scaffold landed; consolidation in progress)  
+**Spec version:** 1.0.0-oss-draft  
 **Repo:** `github.com/LatticeAG/AxiContext`  
 **Last updated:** 2026-07-11
 
 ---
 
-## 0. Executive Verdict
+## 0. Scope Lock & Strategic Context
 
-### Crucial decision: OSS, SaaS, or Hybrid?
+### 0.1 What we are building now
 
-**Recommendation: Hybrid (OSS-first open-core + hosted SaaS).**
+**Phase 1 = OSS only.** Everything in this document through §28 is in scope for the open-source release. No cloud login, push/pull, invite codes, or hosted dashboard in Phase 1.
 
-| Option | Verdict | Why |
-|--------|---------|-----|
-| **Pure OSS** | Reject as sole model | Agents and DevEx tools only win adoption if they live in the repo and local toolchain. Pure OSS builds trust and distribution, but alone it does not fund managed sync, multi-source adapters ops, drift alerting, SSO, or a durable business for LatticeAG. |
-| **Pure SaaS** | Reject as sole model | Coding-agent context must work offline, in air-gapped CI, and inside private repos without shipping source to a vendor by default. Pure SaaS fights trust, Cursor/Claude local workflows, and enterprise security reviews. |
-| **Hybrid (chosen)** | **Ship this** | MIT CLI/SDK/local graph is the adoption engine. Invite-only hosted SaaS is the monetization and team-collaboration layer (encrypted sync, webhooks, dashboard, enterprise adapters). This matches how successful agent-adjacent tools win (open local core + paid cloud). |
+| In scope (OSS v0.1) | Out of scope (Phase 2+) |
+|---------------------|-------------------------|
+| `axictx` CLI (init, sync, serve, drift, query, status, doctor) | `axictx cloud *` commands |
+| Local Context Graph (SQLite) | Encrypted bundle sync to LatticeAG SaaS |
+| Git source adapter | Managed multi-source sync runners |
+| GitHub Issues adapter (v0.1.1) | Drift webhooks / Slack alerts |
+| `PROJECT_CONTEXT.md` generator | SSO, BYOK, audit dashboard |
+| Local Agent Read API (HTTP/JSON) | Multi-repo org workspace |
+| TypeScript SDK | Premium adapter ops at scale |
+| Drift detection + CI annotations | |
+| Policy / secret redaction | |
+| MCP server wrapper (v0.2) | |
 
-**Why Hybrid is the best fit for AxiContext specifically:**
+### 0.2 Long-term business model (context only — not building now)
 
-1. **Trust boundary:** Context is often private code + issues + docs. Local-first is non-negotiable; cloud must be opt-in and encrypted.
-2. **Distribution:** Agents (Cursor, Claude Code, Copilot, custom) integrate via CLI/SDK/local API far faster than via a login wall.
-3. **Network effects:** OSS adapters and `PROJECT_CONTEXT.md` convention can become a de-facto standard; SaaS rides that standard.
-4. **LatticeAG series:** AxiContext OSS feeds Poly / Lex / Vek / Vis; hosted SaaS is the shared control plane across the series later.
-5. **Monetization without killing adoption:** Charge for *operation* (sync, alerts, multi-repo, SSO, BYOK), not for *reading context locally*.
+LatticeAG's long-term model remains **Hybrid** (OSS adoption engine + hosted SaaS monetization). That decision is unchanged, but **this spec and current sprint execute OSS first**. SaaS is documented only in Appendix F so we do not accidentally bake cloud assumptions into the OSS core.
 
-**Open-core boundary (firm recommendation):**
+### 0.3 OSS success definition (v0.1)
 
-| Free / OSS (always) | Paid / Hosted SaaS |
-|---------------------|--------------------|
-| `axictx` CLI (init, sync, serve, drift, query) | Managed multi-source sync runners |
-| Local Context Graph + embeddings cache | Encrypted context storage & workspace sharing |
-| Git + GitHub Issues adapters | Premium adapters ops (Slack/Notion/Confluence at scale) |
-| Local Agent Read API + TypeScript SDK | Drift webhooks, Slack/email alerts, dashboard |
-| `PROJECT_CONTEXT.md` generator | Multi-repo org graph, invite/RBAC, audit logs |
-| Self-hostable single-node (docs + docker compose) | SSO/SAML, BYOK, SLA, enterprise support |
+A developer can run:
 
-**Do not** put the core graph schema, local query, or Markdown generator behind a paywall. That would kill agent adoption.
+```bash
+npm i -g @latticeag/axicontext   # or pnpm / brew / binary
+cd my-repo
+axictx init
+axictx sync
+axictx serve                     # optional
+axictx drift --ci --fail-on-drift
+```
+
+…and get a committed `PROJECT_CONTEXT.md`, a queryable local graph, and CI-friendly drift — **without any network call to LatticeAG**.
+
+### 0.4 Implementation status (as of 2026-07-11)
+
+Parallel build agents landed the OSS scaffold. Status:
+
+| Component | Status | Package / path |
+|-----------|--------|----------------|
+| Monorepo + pnpm workspace | ✅ Landed | `/` |
+| Config TOML + Zod validation | ✅ Landed | `packages/core/src/config.ts` |
+| `axictx init` / `doctor` | ✅ Landed | `packages/core/src/init.ts`, CLI |
+| Git adapter | ✅ Landed | `packages/adapters-git/` |
+| `axictx sync` + Markdown generator | ✅ Landed | `packages/core/src/sync.ts`, `project-context.ts` |
+| SQLite GraphStore (alternate impl) | ✅ Landed | `packages/core/src/graphStore.ts` |
+| Context summary + manifest readers | ✅ Landed | `packages/core/src/context.ts` |
+| Drift engine | ✅ Landed | `packages/core/src/drift.ts` |
+| Agent Read API (Hono) | ✅ Landed | `packages/server/` |
+| CLI serve/drift/query/status | ✅ Landed | `packages/cli/src/axictx-cli.ts` |
+| TypeScript SDK stubs | ✅ Landed | `packages/sdk/` |
+| Unified CLI entrypoint | 🔄 In progress | merge `bin.ts` + `index.ts` → `axictx-cli.ts` |
+| GraphStore consolidation | ⏳ TODO | `graphStore.ts` vs `graph-store.ts` — pick one |
+| GitHub Issues adapter | ⏳ TODO | `packages/adapters-github/` |
+| Secret redaction policy pack | ⏳ TODO | `packages/core/src/policy.ts` |
+| MCP server | ⏳ v0.2 | `packages/mcp/` |
+| npm publish / brew / GH Releases | ⏳ TODO | release pipeline |
 
 ---
 
 ## 1. Problem Statement
 
-AI coding agents, PMs, and autonomous systems repeatedly lose project context when they work across repositories, issues, documents, and conversations. Existing approaches are fragmented and brittle:
+AI coding agents lose project context across sessions, repos, and tools. Hand-written memory files go stale; issue trackers and wikis are disconnected from code; agents re-read entire repositories and burn tokens.
 
-- **Hand-written memory files** (`.cursorrules`, `CLAUDE.md`, `AGENTS.md`, `PROJECT_CONTEXT.md`) go stale within days.
-- **Issue trackers, wikis, Slack, and meeting notes** are disconnected from the codebase the agent actually edits.
-- **Agents re-ingest entire repositories** every session, wasting tokens and producing inconsistent answers.
-- **No standard machine-readable “context API”** exists for agents to ask: *What is this project? What changed? What decisions bind me?*
-- **Onboarding and team churn** destroy tribal knowledge; new agents and new humans both start cold.
-- **“Context rot”** is silent: architecture sections, auth strategies, and open RFCs diverge from reality without alarms.
+**AxiContext OSS** provides:
 
-**AxiContext** solves this by:
+1. A **canonical `PROJECT_CONTEXT.md`** generated deterministically from repo signals.
+2. A **Context Graph** (SQLite) as machine source of truth under `.axicontext/`.
+3. A **local Agent Read API** for structured slices and provenance-backed queries.
+4. **Drift detection** so CI catches when live state diverges from recorded context.
 
-1. Automatically generating and maintaining a canonical, up-to-date `PROJECT_CONTEXT.md` from repository content, issues, and documentation.
-2. Maintaining a normalized **Context Graph** under `.axicontext/`.
-3. Exposing a **versioned Agent Read API** (local HTTP + SDK) so agents query structured slices with provenance—not raw Markdown dumps.
-4. Detecting **drift** between live project state and recorded context, with CI-friendly exits and annotations.
-5. Optionally syncing **encrypted** context bundles to LatticeAG hosted SaaS for team sharing, alerts, and multi-repo memory.
-
-**One-line positioning:** AxiContext is a *project context controller* — persistent, versioned, queryable memory that lives in and alongside the repo.
+**Positioning:** Project context controller — not a chat product, not an agent executor, not a vector DB replacement.
 
 ---
 
-## 2. Vision & Product Principles
+## 2. Product Principles (OSS)
 
-### 2.1 Vision (12–24 months)
-
-Every serious software repository has a living context layer that agents and humans both trust: generated Markdown for humans, a graph + API for machines, drift alarms for truth, and optional hosted sync for teams.
-
-### 2.2 Principles (non-negotiable)
-
-1. **Local-first, cloud-optional.** Default path never phones home.
-2. **Provenance over vibes.** Every claim in context links to file/issue/doc evidence.
-3. **Deterministic sync where possible.** Same inputs → same graph hash (embeddings may be annotated as non-deterministic).
-4. **Agent-native DX.** Prefer JSON schemas, stable IDs, and small token budgets over prose walls.
-5. **Human-readable escape hatch.** `PROJECT_CONTEXT.md` remains reviewable and editable as a *projection*, not the sole source of truth.
-6. **Fail loud on drift in CI; fail soft in interactive use.**
-7. **Security by default:** loopback API, gitignored caches, customer-controlled encryption for cloud.
-8. **Thin core, fat adapters.** Core stays small; integrations are plugins.
-9. **Compose with LatticeAG series** — do not become Poly (orchestration), Lex (models), Vek (general vectors), or Vis (UI viz).
-10. **Boring reliability over clever RAG demos.** Correct, fresh, small context beats flashy chat.
-
-### 2.3 Jobs To Be Done
-
-| Actor | Job |
-|-------|-----|
-| Coding agent | “Give me the minimum true context to change auth safely.” |
-| Staff engineer | “Keep architecture memory from rotting after the last RFC.” |
-| New hire / new agent | “Understand this monorepo in minutes, not days.” |
-| DevEx | “Standardize how Cursor/Claude/custom agents load project memory.” |
-| PM / writer | “See when docs diverge from code and open issues.” |
-| Security/compliance | “Prove what left the laptop if we enable cloud sync.” |
+1. **Local-only by default.** Zero phone-home in OSS.
+2. **Provenance over prose.** Every excerpt links to path/commit/issue.
+3. **Deterministic sync.** Same inputs → same `content_hash` (embeddings excluded from hash).
+4. **Agent-native.** JSON schemas, stable node IDs, token budgets.
+5. **Human escape hatch.** Markdown projection is reviewable; manual override sections supported.
+6. **Thin core, fat adapters.** Core stays small; integrations are packages.
+7. **CI-first drift.** Loud in CI; soft in interactive use.
+8. **Security defaults.** Loopback API, gitignored caches, denylisted paths.
 
 ---
 
-## 3. Target Users & Personas
+## 3. Target Users (OSS beachhead)
 
-### 3.1 Primary (MVP)
+**Primary:** Engineers using Cursor or Claude Code on TypeScript/Node or Python repos with GitHub.
 
-1. **AI Coding Agents & Framework Authors** — Cursor rules authors, Claude Code users, custom agent builders. Need structured, queryable context without full-repo re-read.
-2. **Platform / DevEx Engineers** (teams ~10–500) — want one convention across tools.
-3. **Staff+/Architect engineers** — own architectural truth and hate stale `CLAUDE.md` files.
+| Persona | OSS job |
+|---------|---------|
+| Coding agent | Minimum true context to change auth safely |
+| Staff engineer | Stop architecture memory from rotting |
+| DevEx | One convention across agent tools |
+| New hire / new agent | Understand repo in minutes |
 
-### 3.2 Secondary (post-MVP / SaaS)
-
-4. **Technical Writers & PMs** — sync requirements/docs with code reality.
-5. **Engineering managers** — onboarding time and knowledge continuity.
-6. **LatticeAG Hosted invitees** — managed sync, drift alerts, multi-repo without ops.
-
-### 3.3 Anti-personas (do not optimize MVP for)
-
-- Non-technical solo “chat with my Notion” consumers (different product).
-- Teams wanting AxiContext to *execute* agents or generate product code (that’s Poly / Lex).
-- Enterprises demanding full Glean/replacement search on day one.
-
-### 3.4 Recommendation: beachhead
-
-**Beachhead = TypeScript/Node and Python repos using Cursor or Claude Code, with GitHub Issues.**  
-Win there, publish the `PROJECT_CONTEXT.md` + Agent Read API convention, then expand adapters and languages.
+**Anti-personas for v0.1:** Non-dev consumers, full Glean replacement, agent orchestration (Poly).
 
 ---
 
-## 4. Competitive Landscape & Differentiation
+## 4. Monorepo Architecture
 
-| Approach | Gap | AxiContext angle |
-|----------|-----|------------------|
-| Hand-written `CLAUDE.md` / `.cursorrules` | Stale, no drift, not queryable | Generated + drift + API |
-| Full-repo RAG / codebase chat | Expensive, noisy, no canonical summary | Curated graph + token-budgeted slices |
-| GitHub Copilot Workspace / agent memories | Vendor-locked, opaque | OSS local standard + optional cloud |
-| Notion AI / Glean | Not repo-native, heavy SaaS | Repo-native first |
-| Internal “context.md” scripts | One-off, no schema, no SDK | Productized schema + adapters + CI |
+### 4.1 Workspace layout (authoritative)
 
-**Differentiation line to keep repeating:** Not another chat context window. A *controller* for project memory: generate, version, query, drift-detect, optionally sync.
-
----
-
-## 5. Core Concepts
-
-| Term | Definition |
-|------|------------|
-| **Context Graph** | Normalized, versioned graph of project knowledge: files, modules, packages, issues, docs, people, decisions, dependencies, ADRs. Source of truth under `.axicontext/`. |
-| **PROJECT_CONTEXT.md** | Human-readable Markdown *projection* of the graph. Canonical *committed* artifact by default (see §12 recommendation). |
-| **Source Adapters** | Pluggable ingest: git, GitHub Issues, Linear, Notion, Confluence, Slack, etc. |
-| **Drift** | Meaningful difference between live sources and last recorded graph/manifest. |
-| **Agent Read API** | Local HTTP (and later gRPC optional) + SDK for agents to fetch slices with provenance. |
-| **Context Manifest** | `.axicontext/manifest.json` — schema version, adapters, timestamps, content hashes, embedding model id. |
-| **Context Bundle** | Encrypted export of graph + manifest + optional embeddings for cloud pull/push. |
-| **Slice** | Filtered subgraph for a topic/path/issue with depth and token budget. |
-| **Provenance** | Evidence pointers: path, line range, commit SHA, issue URL, doc URL, adapter id. |
-| **Hosted Sync** | Optional SaaS: store bundles, run managed ingest, emit drift events/webhooks. |
-| **Workspace** | SaaS org unit spanning one or more repos. |
-| **Policy Pack** | Rules for what may enter context (secret redaction, path denylist, max excerpt length). |
-
----
-
-## 6. Product Requirements Overview
-
-### 6.1 Must-have (MVP)
-
-- `axictx init|sync|serve|drift|query`
-- Git adapter (tree, README, manifests, recent commits, basic language detection)
-- GitHub Issues adapter (open issues + labels + milestones)
-- Context Graph schema v1 + `manifest.json`
-- `PROJECT_CONTEXT.md` generator (stable section order)
-- Local Agent Read API: `GET /v1/context`, `GET /v1/context/slice`, `POST /v1/context/query`
-- TypeScript SDK stubs matching API
-- Drift detection for files, deps, README, issue set hash
-- Secret redaction + path denylist
-- Cloud skeleton: invite-gated `login|push|pull` of encrypted bundles (minimal dashboard optional for MVP)
-- MIT license, docs: quickstart + schema + security model
-
-### 6.2 Should-have (v0.2–0.3)
-
-- GitHub Actions: `axictx drift --ci`
-- Optional commit hook (off by default)
-- Linear adapter
-- Python SDK
-- Docker compose self-host for team local server
-- Hosted drift webhooks + email/Slack notify
-- Multi-repo workspace (SaaS)
-
-### 6.3 Could-have (later)
-
-- Notion / Confluence / Slack adapters
-- ADR ingestion (`docs/adr/**`)
-- Rust SDK / single static binary via Bun compile or equivalent
-- gRPC Agent API
-- Visual Context Graph in Vis product
-- Auto-PR that updates `PROJECT_CONTEXT.md` on drift
-
-### 6.4 Won’t (non-goals) — see §22
-
----
-
-## 7. User Journeys
-
-### 7.1 Solo engineer + Cursor (OSS)
-
-1. `npm i -g @latticeag/axicontext` (or brew / binary).
-2. `axictx init` in repo → `.axicontext/config.toml`, gitignore suggestions.
-3. `axictx sync` → `PROJECT_CONTEXT.md` + graph.
-4. Point Cursor/Claude to “read PROJECT_CONTEXT.md first” *or* `axictx serve` + MCP/HTTP tool.
-5. Before PR: `axictx drift`; fix or re-sync.
-6. Commit `PROJECT_CONTEXT.md` + config (not embeddings cache).
-
-### 7.2 Team CI gate (OSS)
-
-1. CI runs `axictx sync --check` or `axictx drift --ci --fail-on-drift`.
-2. Annotations show stale architecture section / new critical dependency.
-3. Human updates sources or accepts regenerated context via PR.
-
-### 7.3 Hosted team (Hybrid)
-
-1. Admin receives invite → creates workspace → connects GitHub App.
-2. Devs `axictx cloud login` with device flow.
-3. `axictx sync && axictx cloud push` (or SaaS-managed sync on push webhook).
-4. Drift webhook → Slack channel; dashboard shows history.
-5. New clone: `axictx cloud pull` bootstraps context before first full sync.
-
-### 7.4 Agent query path
-
-1. Agent calls `POST /v1/context/query` with question + `max_tokens`.
-2. API returns snippets + provenance + graph node IDs.
-3. Agent answers grounded in those snippets; may fall back to file reads for details.
-
----
-
-## 8. CLI Surface (`axictx`)
-
-### 8.1 Command map
-
-```bash
-axictx init [--force] [--yes]
-axictx sync [--fail-on-drift] [--adapters git,github] [--dry-run]
-axictx serve [--port 8787] [--host 127.0.0.1] [--socket PATH]
-axictx drift [--format json|md|sarif] [--ci] [--fail-on-drift]
-axictx query "<question>" [--max-tokens 4000] [--json]
-axictx status
-axictx adapters list|enable|disable|test <name>
-axictx config get|set|path
-axictx doctor                 # env, tokens, schema, disk
-axictx cloud login|logout|whoami|push|pull|status
-axictx export [--out bundle.axicrypt]
-axictx import <bundle>
-axictx schema print           # JSON Schema for graph
+```text
+/
+├── SPEC.md                          # this document
+├── README.md
+├── LICENSE                          # MIT
+├── package.json                     # private root
+├── pnpm-workspace.yaml
+├── tsconfig.base.json
+├── vitest.config.ts
+├── packages/
+│   ├── core/                        # @latticeag/axicontext-core
+│   ├── cli/                         # @latticeag/axicontext (bin: axictx)
+│   ├── sdk/                         # @latticeag/axicontext-sdk
+│   ├── server/                      # @latticeag/axicontext-server
+│   ├── adapters-git/                # @latticeag/axicontext-adapter-git
+│   └── adapters-github/             # @latticeag/axicontext-adapter-github (v0.1.1)
+├── testdata/
+│   └── fixtures/
+│       ├── minimal-node-repo/
+│       ├── minimal-python-repo/
+│       └── drift-seed-repo/
+├── tests/                           # integration: server routes, drift
+└── docs/                            # user docs (post-scaffold)
 ```
 
-### 8.2 Recommendations (CLI UX)
+### 4.2 Package dependency graph
 
-- **Binary name:** `axictx` (short); package `@latticeag/axicontext`.
-- **Colors + sparklines optional;** always support `NO_COLOR` and `--json` for automation.
-- **Exit codes:** `0` ok, `1` generic error, `2` drift failed, `3` auth/config, `4` adapter failure.
-- **Progress:** show adapter phases on TTY; quiet in CI (`CI=1`).
-- **Idempotent `init`:** refuse overwrite unless `--force`.
-- **`doctor`:** first-class; saves support burden.
+```text
+adapters-git ──┐
+adapters-github┼──► core ◄── sdk
+               │      ▲
+               │      │
+               └──────┼──► server ◄── cli
+```
 
-### 8.3 Detailed command behavior
+**Rules:**
+
+- `core` must not depend on `cli`, `server`, or adapters (adapters depend on core types only).
+- `server` depends on `core` only.
+- `cli` depends on `core`, `server`, and dynamically loads adapters at sync time.
+- Adapters are separate packages so community can add `adapters-linear` without forking core.
+
+### 4.3 Tech stack (locked for OSS v0.1)
+
+| Layer | Choice | Version constraint |
+|-------|--------|-------------------|
+| Runtime | Node.js | `>=22` |
+| Language | TypeScript | `^5.9` |
+| Package manager | pnpm | workspaces |
+| CLI parsing | commander | `^14` |
+| Config | `@iarna/toml` + zod | |
+| HTTP server | Hono + `@hono/node-server` | |
+| Graph DB | better-sqlite3 + FTS5 | |
+| Glob | fast-glob | |
+| Tests | vitest | |
+| Hashing | SHA-256 (Node crypto) | deterministic stringify |
+
+**Explicitly not in v0.1:** LLM calls for sync, cloud embeddings, gRPC, Rust rewrite.
+
+---
+
+## 5. On-Disk Layout (per repository)
+
+After `axictx init` + `axictx sync`:
+
+```text
+my-repo/
+├── PROJECT_CONTEXT.md               # human projection (commit by default)
+├── .gitignore                       # should include cache paths (suggested by init)
+└── .axicontext/
+    ├── config.toml                  # user config (commit)
+    ├── manifest.json                # sync metadata + adapter digests (commit)
+    ├── graph/
+    │   └── graph.sqlite             # Context Graph (gitignore recommended)
+    ├── cache/                       # adapter raw caches (gitignore)
+    │   └── adapters/
+    └── policies/
+        └── default.toml             # redaction rules (commit, v0.1.1)
+```
+
+### 5.1 Gitignore recommendations (printed by `init`)
+
+```gitignore
+.axicontext/cache/
+.axicontext/graph/
+.axicontext/state/
+.axicontext/*.local.toml
+```
+
+### 5.2 What to commit (recommendation)
+
+| Path | Commit? | Why |
+|------|---------|-----|
+| `PROJECT_CONTEXT.md` | **Yes** (default) | Agents work without daemon; visible in PRs |
+| `.axicontext/config.toml` | **Yes** | Team-shared adapter settings |
+| `.axicontext/manifest.json` | **Yes** | Drift baseline for CI |
+| `.axicontext/graph/graph.sqlite` | **No** | Regenerated; large; machine-only |
+| `.axicontext/cache/**` | **No** | Ephemeral |
+
+Config escape hatch: `project_context.commit = false` and `manifest.commit = false` (future config key).
+
+---
+
+## 6. Configuration (`config.toml`)
+
+### 6.1 Full schema (v1.0.0)
+
+```toml
+schema_version = "1.0.0"
+
+[project]
+name = ""                          # empty = autodetect from package.json / folder name
+default_branch = "main"
+
+[project_context]
+path = "PROJECT_CONTEXT.md"
+commit = true
+max_chars = 80000
+llm_polish = false                 # v0.2+; must stay false in v0.1
+
+[serve]
+host = "127.0.0.1"                 # WARN if not loopback without api_token
+port = 8787
+api_token = ""                     # empty = no auth (loopback only)
+
+[drift]
+fail_on = ["high", "critical"]
+ignore_paths = ["**/dist/**", "**/coverage/**", "**/node_modules/**"]
+
+[adapters.git]
+enabled = true
+important_path_globs = ["README*", "docs/**", "**/auth/**", "CODEOWNERS", "LICENSE", "SECURITY.md", ".github/workflows/*"]
+recent_commits = 30
+max_excerpt_files = 50
+max_lines_per_file = 200
+tree_max_depth = 3
+
+[adapters.github_issues]
+enabled = false
+state = "open"                     # open | closed | all
+max_issues = 100
+label_include = []                 # empty = all
+label_exclude = []
+
+[query]
+max_tokens_default = 4000
+embeddings = "off"                 # off | auto (v0.2)
+
+[policy]
+denylist_globs = ["**/.env", "**/*secret*", "**/credentials*", "**/*.pem", "**/*.key"]
+redact_patterns = ["default"]
+```
+
+### 6.2 Zod validation rules
+
+- `schema_version` must equal `"1.0.0"` for v0.1 (reject unknown major).
+- `serve.port` ∈ [1, 65535].
+- `drift.fail_on` non-empty array of `low | medium | high | critical`.
+- `project_context.max_chars` positive integer, max `500_000` (hard cap).
+- Unknown top-level keys: **warn** in v0.1, **reject** in v1.0.
+
+### 6.3 Environment overrides
+
+| Env var | Overrides |
+|---------|-----------|
+| `AXICTX_REPO_ROOT` | Default repo root for all commands |
+| `AXICTX_CONFIG` | Path to alternate config file |
+| `AXICTX_SERVE_HOST` | `serve.host` |
+| `AXICTX_SERVE_PORT` | `serve.port` |
+| `GITHUB_TOKEN` | GitHub Issues adapter |
+| `CI=1` | Suppress spinners; force non-interactive |
+
+---
+
+## 7. CLI Specification (`axictx`)
+
+### 7.1 Global behavior
+
+- Binary name: `axictx`
+- npm package: `@latticeag/axicontext`
+- Default repo root: `process.cwd()` or `AXICTX_REPO_ROOT`
+- All commands support `--json` where output is structured (v0.1.1 polish)
+- `NO_COLOR=1` respected
+
+### 7.2 Exit codes (locked)
+
+| Code | Name | When |
+|------|------|------|
+| `0` | Ok | Success |
+| `1` | Error | Unexpected failure, adapter crash |
+| `2` | Drift | `--fail-on-drift` and severity ∈ `drift.fail_on` |
+| `3` | Config | Invalid/missing config |
+| `4` | Adapter | One or more adapters failed ingest |
+
+### 7.3 Commands
 
 #### `axictx init`
 
-- Creates `.axicontext/` (`config.toml`, `graph/` placeholder, `.gitignore` template for cache).
-- Detects package ecosystem(s): Node, Python, Rust, Go, Java, mixed monorepo.
-- Interactive adapter enablement; `--yes` enables `git` only.
-- **Recommendation:** Suggest committing `config.toml` + `PROJECT_CONTEXT.md`; gitignore `graph/embeddings/`, `cache/`, `*.sqlite`.
+```bash
+axictx init [--overwrite-config] [--yes]
+```
+
+**Behavior:**
+
+1. Create `.axicontext/` if missing.
+2. Write `config.toml` from `DEFAULT_CONFIG_TOML` unless exists (refuse overwrite without flag).
+3. Detect repo type: `node | python | rust | go | mixed | unknown` via manifest files.
+4. Create empty `PROJECT_CONTEXT.md` with banner stub if missing.
+5. Print `.gitignore` suggestions (do not auto-edit `.gitignore` in v0.1 — user choice).
+
+**Acceptance:** Running twice without `--overwrite-config` is idempotent.
+
+#### `axictx doctor`
+
+```bash
+axictx doctor
+```
+
+**Checks:**
+
+- Node `>=22`
+- `.axicontext/` exists
+- `config.toml` parses and validates
+- (v0.1.1) `graph.sqlite` readable if manifest exists
+- (v0.1.1) warn if `serve.host != 127.0.0.1` and no `api_token`
 
 #### `axictx sync`
 
-- Runs enabled adapters → merge into Context Graph → policy pack (redaction) → write graph artifacts → regenerate Markdown → update manifest → optional drift report.
-- `--dry-run`: print planned writes + drift without mutating.
-- `--fail-on-drift`: exit `2` if severity ≥ configured threshold.
+```bash
+axictx sync [--repo-root PATH] [--dry-run] [--fail-on-drift]
+            [--adapters git,github_issues]
+            [--max-chars N] [--max-files N] [--max-lines-per-file N]
+```
+
+**Pipeline (ordered steps):**
+
+```text
+1. Load config.toml
+2. Open/create GraphStore at .axicontext/graph/graph.sqlite
+3. For each enabled adapter (in dependency order):
+   a. adapter.detect(repoRoot) → skip if false
+   b. adapter.ingest(ctx) → nodes, edges, digest, warnings
+   c. merge into graph (upsert by stable id)
+   d. record adapter digest in memory
+4. Apply policy pack (redact excerpts, drop denylisted paths)
+5. Compute content_hash = sha256(stableStringify({adapters, nodeIds, edgeIds, excerptIds}))
+6. Write manifest.json
+7. Generate PROJECT_CONTEXT.md from graph + heuristics
+8. If --fail-on-drift: run drift engine vs previous manifest; exit 2 if needed
+9. Print summary JSON to stdout
+```
+
+**Performance target:** `< 30s` for repos ≤10k files (important-file cap, not full tree).
 
 #### `axictx serve`
 
-- Default `127.0.0.1:8787`.
-- Optional Unix socket for containers.
-- Optional `--token` / config API key if binding non-loopback (warn loudly).
-- Health: `GET /healthz`.
+```bash
+axictx serve [--host 127.0.0.1] [--port 8787]
+```
+
+- Starts Hono server from `@latticeag/axicontext-server`.
+- Loads config for host/port/token.
+- **Refuse** `0.0.0.0` without `api_token` (v0.1.1 hardening).
+- Blocks until SIGINT.
 
 #### `axictx drift`
 
-- Compares live adapter digests vs manifest.
-- Formats: Markdown (human), JSON (tools), SARIF (GitHub code scanning-friendly).
-- `--ci`: GitHub Actions workflow commands / annotations.
+```bash
+axictx drift [--format json|md|sarif] [--ci] [--fail-on-drift]
+```
+
+See §14.
 
 #### `axictx query`
 
-- Local retrieval over graph + optional embeddings.
-- Default: hybrid keyword + embedding; CPU-local model.
-- Always print provenance in human mode.
-
-#### `axictx cloud *`
-
-- Device-code or browser login; store refresh token in OS keychain (fallback: `~/.config/axicontext/credentials.json` with 0600).
-- Push/pull encrypted bundles; invite code required in beta.
-
----
-
-## 9. Agent Read API
-
-### 9.1 Transport
-
-- **MVP:** HTTP/JSON on loopback.
-- **Later:** optional gRPC; optional MCP server wrapper (`axictx mcp`) — **strong recommendation** to ship MCP early (v0.2) because Cursor/Claude ecosystem is MCP-shaped.
-
-### 9.2 Endpoints (v1)
-
-```http
-GET /healthz
-
-GET /v1/context
-Accept: application/json
-→ full graph summary + manifest (paginate large graphs via ?cursor=)
-
-GET /v1/context/slice?topic=authentication&depth=2&max_tokens=2000
-→ filtered subgraph + excerpts + provenance
-
-POST /v1/context/query
-{
-  "question": "How do I add a new OAuth provider?",
-  "max_tokens": 4000,
-  "include": ["code", "issues", "docs"],
-  "repo_path": "."
-}
-→ { "answer_context": [...snippets], "nodes": [...], "manifest_version": "..." }
-
-GET /v1/manifest
-GET /v1/drift
-GET /v1/openapi.json
+```bash
+axictx query "<question>" [--max-tokens 4000] [--json]
 ```
 
-### 9.3 API recommendations
+See §15.
 
-- **Version in path** (`/v1`); never break without bump.
-- **ETag / `If-None-Match`** on `GET /v1/context` for agent caches.
-- **Token budgets are first-class** — agents pass `max_tokens`; server enforces hard cap from config.
-- **No remote bind by default.** Document danger of LAN bind.
-- **CORS:** disabled by default; only needed for local web UIs explicitly enabled.
+#### `axictx status`
 
-### 9.4 MCP tool mapping (recommended v0.2)
+```bash
+axictx status [--json]
+```
 
-| MCP tool | Maps to |
-|----------|---------|
-| `get_project_context` | slice of overview nodes |
-| `query_context` | `/v1/context/query` |
-| `get_drift` | `/v1/drift` |
-| `get_manifest` | `/v1/manifest` |
+Prints manifest summary + graph stats (node count, excerpt count, adapters, last sync).
+
+#### Deferred commands (documented, not v0.1)
+
+```bash
+axictx adapters list|enable|disable|test <name>
+axictx config get|set|path
+axictx export [--out bundle.json]
+axictx import <bundle>
+axictx schema print
+axictx mcp serve                    # v0.2
+```
 
 ---
 
-## 10. SDKs
+## 8. Context Graph — Data Model
 
-### 10.1 TypeScript (primary, MVP)
+### 8.1 Design principles
+
+- **Stable IDs:** `type:slug` pattern, e.g. `file:src/auth/session.ts`, `dep:express`, `issue:github:42`.
+- **Do not graph every file.** Cap important files; store full tree as a single digest node.
+- **Provenance on every excerpt.** No orphan text.
+- **JSON `data` column** on nodes/edges for extensibility; validate with Zod per `type`.
+
+### 8.2 SQLite DDL (v1)
+
+```sql
+CREATE TABLE IF NOT EXISTS nodes (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL,              -- JSON
+  created_at TEXT NOT NULL,        -- ISO-8601 UTC
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS edges (
+  id TEXT PRIMARY KEY,
+  from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS excerpts (
+  id TEXT PRIMARY KEY,             -- sha256(text + provenance) or explicit
+  text TEXT NOT NULL,
+  provenance TEXT NOT NULL         -- JSON Provenance
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
+  id UNINDEXED,
+  text
+);
+
+CREATE INDEX IF NOT EXISTS idx_edges_from_id ON edges(from_id);
+CREATE INDEX IF NOT EXISTS idx_edges_to_id ON edges(to_id);
+CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+```
+
+### 8.3 Node types (v1 enum)
+
+| Type | ID pattern | Required `data` fields |
+|------|------------|------------------------|
+| `project` | `project:{name}` | `name`, `root`, `ecosystems[]` |
+| `module` | `module:{path}` | `path`, `name`, `ecosystem` |
+| `file` | `file:{posix-path}` | `path`, `role`, `language?` |
+| `dependency` | `dep:{eco}:{name}` | `name`, `version`, `ecosystem`, `direct` |
+| `issue` | `issue:{provider}:{id}` | `title`, `state`, `labels[]`, `url` |
+| `doc` | `doc:{path\|url}` | `title`, `path?`, `url?` |
+| `decision` | `decision:{slug}` | `title`, `status`, `path` |
+| `commit` | `commit:{sha}` | `sha`, `date`, `message` |
+| `tree_digest` | `tree:digest` | `digest`, `file_count`, `depth` |
+| `person` | `person:{handle}` | `handle`, `name?` |
+
+### 8.4 Edge types (v1 enum)
+
+| Type | Meaning | Example |
+|------|---------|---------|
+| `contains` | parent → child | project → module |
+| `depends_on` | module → dependency | module → dep:express |
+| `documents` | doc → module | README → project |
+| `tracked_by` | code → issue | file:auth → issue:42 |
+| `decided_in` | decision → module | ADR → auth module |
+| `references` | any → any | loose link |
+| `authored_by` | commit → person | optional |
+
+### 8.5 Provenance schema
 
 ```typescript
-import { AxiContext } from "@latticeag/axicontext";
-
-const ctx = await AxiContext.fromRepo(".");
-const slice = await ctx.slice({ topic: "authentication", depth: 2, maxTokens: 2000 });
-const result = await ctx.query({ question: "How do I add OAuth?", maxTokens: 4000 });
-const drift = await ctx.drift();
-```
-
-**Recommendations:**
-
-- Dual use: library can run sync/query in-process *or* talk to `axictx serve`.
-- Publish types; Zod or JSON Schema shared with CLI.
-- Tree-shakeable; no telemetry SDK required for OSS core.
-
-### 10.2 Python (v0.2)
-
-- `pip install axicontext`; mirror TS API for agent frameworks (LangGraph, etc.).
-
-### 10.3 Rust (later)
-
-- Only if binary size / embedding pipeline needs it; don’t block MVP.
-
----
-
-## 11. Context Graph — Data Model (v1 recommendation)
-
-### 11.1 Storage layout
-
-```text
-.axicontext/
-  config.toml
-  manifest.json
-  graph/
-    nodes.jsonl          # or nodes.sqlite — see recommendation below
-    edges.jsonl
-    excerpts/            # content-addressed excerpt blobs
-  cache/
-    adapters/            # adapter raw digests
-    embeddings/          # gitignored
-  policies/
-    default.toml
-```
-
-**Storage recommendation:** Start with **SQLite** (`graph.sqlite`) for nodes/edges/FTS — simpler queries, single file, easy backup. Keep JSONL export as `axictx export --format jsonl` for debuggability. JSONL-only is fine for tiny MVP day 1–2, but SQLite should be the near-term default.
-
-### 11.2 Node types
-
-| Type | Examples | Key fields |
-|------|----------|------------|
-| `project` | root | name, description, primary_language, repo_url |
-| `module` | packages/workspaces | path, name, ecosystem |
-| `file` | important files only (not every file) | path, role (`readme`,`config`,`entrypoint`,`adr`,…) |
-| `symbol` | optional later | name, kind, file, range |
-| `dependency` | npm/pip/cargo deps | name, version, eco, direct/transitive |
-| `issue` | GitHub/Linear | id, title, labels, state, url |
-| `doc` | wiki/notion page | title, url, updated_at |
-| `decision` | ADR | status, date, path |
-| `person` | CODEOWNERS / committers (optional) | name, handle |
-| `api` | OpenAPI routes (optional) | method, path |
-| `secret_risk` | redaction hits (meta) | pattern_id, path |
-
-**Recommendation:** Do **not** graph every file. Cap “important files” via heuristics: README, manifests, `src/**/index.*`, `app/**/page.*`, OpenAPI, Terraform roots, `docs/**`, CODEOWNERS, CI workflows, auth modules (path keywords). Full tree lives as a **digest**, not millions of nodes.
-
-### 11.3 Edge types
-
-`contains`, `depends_on`, `implements`, `documents`, `tracked_by`, `decided_in`, `owned_by`, `references`, `drifts_from` (computed).
-
-### 11.4 Provenance object (every node/excerpt)
-
-```json
-{
-  "adapter": "git",
-  "path": "src/auth/oauth.ts",
-  "start_line": 40,
-  "end_line": 88,
-  "commit": "abc123",
-  "url": "https://github.com/org/repo/blob/abc123/src/auth/oauth.ts#L40-L88",
-  "ingested_at": "2026-07-11T12:00:00Z"
+interface Provenance {
+  adapter: string;           // "git" | "github_issues"
+  path?: string;
+  start_line?: number;
+  end_line?: number;
+  commit?: string;           // full sha
+  url?: string;
+  ingested_at: string;       // ISO-8601 UTC
 }
 ```
 
-### 11.5 Manifest (`manifest.json`)
+### 8.6 GraphStore public API
+
+```typescript
+class GraphStore {
+  static open(repoRoot: string): GraphStore;
+
+  upsertNode(input: UpsertNodeInput): Node;
+  upsertEdge(input: UpsertEdgeInput): Edge;
+  addExcerpt(input: AddExcerptInput): Excerpt;
+
+  getNode(id: string): Node | null;
+  getSlice(opts: { topic: string; depth: number; maxTokens: number }): GraphSlice;
+  searchExcerpts(query: string, limit: number): Excerpt[];
+
+  computeContentHash(): string;
+  exportManifest(adapterDigests: Record<string, AdapterDigest>): Manifest;
+  writeManifest(manifest: Manifest): void;
+
+  close(): void;
+}
+```
+
+### 8.7 `getSlice` algorithm (recommendation)
+
+```text
+INPUT: topic string T, depth D, maxTokens B
+
+1. Seed nodes = nodes where id/name/path/title fuzzy-matches T (FTS + keyword)
+2. If empty, seed = project node + overview excerpts
+3. BFS from seeds up to depth D along edges (priority: contains, documents, decided_in, depends_on)
+4. Collect excerpts linked to visited nodes (via node.data.excerpt_ids or edges)
+5. Pack excerpts greedily by relevance score until token budget B
+   - token estimate = ceil(characters / 4)
+6. Return { nodes, edges, snippets[], tokens_used, provenance[] }
+```
+
+### 8.8 Manifest (`manifest.json`)
 
 ```json
 {
   "schema_version": "1.0.0",
   "axictx_version": "0.1.0",
-  "generated_at": "...",
-  "project_root": ".",
-  "content_hash": "sha256:...",
-  "adapters": {
-    "git": { "digest": "sha256:...", "stats": { "files_considered": 120 } },
-    "github_issues": { "digest": "sha256:...", "open_count": 42 }
-  },
-  "embedding_model": "none|model-id",
+  "generated_at": "2026-07-11T13:00:00.000Z",
+  "project_root": "/abs/path/to/repo",
+  "content_hash": "sha256:abcdef...",
+  "project_context_hash": "sha256:...",
+  "embedding_model": "none",
   "policy_pack": "default@1",
-  "project_context_hash": "sha256:..."
+  "adapters": {
+    "git": {
+      "digest": "sha256:...",
+      "ingested_at": "2026-07-11T13:00:00.000Z",
+      "stats": {
+        "files_considered": 120,
+        "files_excerpted": 7,
+        "manifests": 1,
+        "lockfiles": 1,
+        "commits": 30
+      },
+      "warnings": []
+    }
+  },
+  "stats": {
+    "node_count": 17,
+    "edge_count": 19,
+    "excerpt_count": 7
+  }
 }
 ```
 
-### 11.6 Schema evolution
-
-- Semver `schema_version`.
-- Migrations in CLI; refuse unknown major without `--migrate`.
-- Publish JSON Schema at `axictx schema print` and in docs.
+**Drift baseline:** Compare current adapter `digest` values and key signals (§14) to last manifest.
 
 ---
 
-## 12. `PROJECT_CONTEXT.md` Format
+## 9. `PROJECT_CONTEXT.md` Generator
 
-### 12.1 Commit or generate-only?
+### 9.1 Rules
 
-**Recommendation: Commit `PROJECT_CONTEXT.md` by default.**
-
-| Pros of committing | Cons |
-|--------------------|------|
-| Agents work with zero daemon | Merge conflicts |
-| Visible in PRs / reviewable | Can go stale if CI not enforced |
-| Works in GitHub web UI | Noise in diffs |
-
-**Mitigations:** Stable section order; “machine-managed” banner; CI drift gate; optional `axictx sync --write-pr` later.  
-**Config escape hatch:** `project_context.commit = false` for teams that prefer artifact-only.
-
-### 12.2 Recommended section skeleton (stable order)
+- **Deterministic:** No LLM in v0.1. Template + heuristics only.
+- **Stable section order** (always same headings).
+- **Banner comment** first line:
 
 ```markdown
-<!-- axi:generated managed-by=axictx schema=1.0.0 hash=... -->
+<!-- axi:generated managed-by=axictx schema=1.0.0 hash=sha256:... -->
+```
+
+- **Max length:** `project_context.max_chars` (truncate lowest-priority sections first: glossary → provenance detail).
+- **Manual sections:** Content between `<!-- axi:manual -->` … `<!-- /axi:manual -->` preserved across sync.
+
+### 9.2 Section template (locked order)
+
+```markdown
 # Project Context
 
 ## Overview
@@ -504,699 +618,726 @@ const drift = await ctx.drift();
 ## Provenance & Manifest
 ```
 
-### 12.3 Rules
+### 9.3 Heuristic signals for Architecture section
 
-- Banner comment with schema + hash.
-- Hard max length configurable (default ~800–1500 lines / ~50–80k chars) — **prefer smaller**.
-- No secrets; redact aggressively.
-- Architecture prose: prefer bullets from detected signals over LLM fluff in MVP.
-- **MVP generation recommendation:** template + heuristics first; optional LLM polish behind `--llm` flag and explicit API key (off by default). Deterministic core builds trust.
+| Signal | Bullet emitted |
+|--------|----------------|
+| Paths matching `**/auth/**` | Authentication-related modules present |
+| `.github/workflows/*` exists | CI/CD via GitHub Actions |
+| `next` in dependencies | Next.js frontend detected |
+| `express`/`fastify`/`hono` in deps | HTTP service architecture |
+| `typescript` in devDependencies | TypeScript toolchain |
+| `prisma`/`drizzle` in deps | ORM / database layer |
+| `docker-compose.yml` | Containerized local dev |
+| Multiple `package.json` in workspaces | Monorepo layout |
 
-### 12.4 Human edits
+### 9.4 Human override path (v0.1.1)
 
-**Recommendation:** Treat human edits as *hints* via `PROJECT_CONTEXT.override.md` or `config.toml [overview] description = """..."""` rather than editing the generated file. If users edit generated file, next sync overwrites unless sections marked `<!-- axi:manual -->` … `<!-- /axi:manual -->`.
+Optional `.axicontext/overview.toml`:
+
+```toml
+[overview]
+description = """
+Custom project description that sync will prepend to Overview.
+"""
+architecture_notes = [
+  "We use event sourcing in the billing module.",
+]
+```
 
 ---
 
-## 13. Source Adapters
+## 10. Source Adapter Interface
 
-### 13.1 Adapter interface (recommendation)
+### 10.1 TypeScript interface (core)
 
 ```typescript
+interface RepoContext {
+  repoRoot: string;
+}
+
+interface IngestContext extends RepoContext {
+  config: ResolvedConfig;
+  signal?: AbortSignal;
+}
+
+interface AdapterResult {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  digest: string;              // sha256 of canonical adapter snapshot
+  warnings: string[];
+  metadata: Record<string, unknown>;
+}
+
 interface SourceAdapter {
-  id: string;
+  readonly id: string;
   detect(ctx: RepoContext): Promise<boolean>;
-  ingest(ctx: IngestContext): Promise<AdapterResult>; // nodes, edges, digest, warnings
+  ingest(ctx: IngestContext): Promise<AdapterResult>;
 }
 ```
 
-- Timeout + partial failure isolation per adapter.
-- Capability flags: `requires_network`, `requires_secret`, `supports_incremental`.
+### 10.2 Adapter execution contract
 
-### 13.2 Priority order (recommendation)
+- **Timeout:** 60s per adapter (configurable).
+- **Partial failure:** One adapter failure logs warning; others continue. Exit `4` only if all enabled adapters fail.
+- **Deterministic digest:** Hash sorted canonical JSON of adapter-specific snapshot (not filesystem mtime alone).
 
-| Priority | Adapter | MVP? | Notes |
-|----------|---------|------|-------|
-| P0 | `git` | Yes | Always on |
-| P0 | `github_issues` | Yes | Via `gh` or `GITHUB_TOKEN` |
-| P1 | `linear` | Soon | High PM overlap |
-| P1 | `markdown_docs` | Soon | `docs/**`, ADR folders |
-| P2 | `github_prs` | Later | Open PR themes |
-| P2 | `notion` | SaaS-skewed | Token heavy |
-| P2 | `confluence` | Enterprise | |
-| P3 | `slack` | Careful | Noise; summary-only |
-| P3 | `jira` | Enterprise | |
-| P3 | `figma`/`miro` | No | Out of scope early |
+### 10.3 Adapter registry (compile-time v0.1)
 
-### 13.3 Git adapter details
+```typescript
+const ADAPTERS: Record<string, SourceAdapter> = {
+  git: new GitSourceAdapter(),
+  github_issues: new GitHubIssuesAdapter(),  // v0.1.1
+};
+```
 
-Ingest:
+**v0.2:** Dynamic import from `config.adapters.*.module` for community adapters.
 
-- Root README / docs README
-- Package manifests & lockfile hash (not full lockfile body)
-- Language/framework fingerprints
-- Top-level tree summary
-- Recent commits (N=30 default): messages only
-- CI config presence
-- CODEOWNERS / LICENSE / SECURITY.md
-- Auth-looking paths heuristic list
-- Important file excerpts (bounded)
+---
 
-### 13.4 GitHub Issues adapter
+## 11. Git Adapter (`@latticeag/axicontext-adapter-git`)
 
-- Open issues (paginate cap configurable)
-- Labels, milestones, assignees (handles only)
-- Issue body truncated; link out for full text
-- Digest = hash of sorted issue id+updated_at+labels
+### 11.1 Detection
+
+- `.git` directory exists, OR
+- `git rev-parse --is-inside-work-tree` returns `true`
+
+### 11.2 Ignored paths (always)
+
+```text
+**/node_modules/**  **/.git/**  **/dist/**  **/build/**  **/.next/**
+**/coverage/**  **/.turbo/**  **/target/**  **/out/**
+```
+
+### 11.3 Ingest steps (ordered)
+
+```text
+1. project node from folder name + detected ecosystems
+2. tree_digest node: walk depth≤3, skip IGNORED dirs, hash sorted relative paths
+3. manifest files: package.json, pyproject.toml, Cargo.toml, go.mod, pom.xml
+   → module nodes + dependency edges
+4. lockfiles: hash only (package-lock.json, pnpm-lock.yaml, yarn.lock, Cargo.lock, go.sum, …)
+   → file nodes with role=lockfile, data.hash only
+5. important files via IMPORTANT_GLOBS (cap max_excerpt_files)
+   → file nodes + excerpts with line ranges + provenance.commit=HEAD
+6. recent commits (git log -n N) → commit nodes, authored_by edges optional
+7. README / docs: role=readme|doc
+8. CI workflows: file nodes role=ci
+9. Compute adapter digest = sha256(stableStringify(snapshot))
+```
+
+### 11.4 Dependency parsing
+
+| Manifest | Parser |
+|----------|--------|
+| `package.json` | `dependencies`, `devDependencies` (mark dev separately) |
+| `pyproject.toml` | PEP 621 `dependencies` (v0.1.1) |
+| `Cargo.toml` | `[dependencies]` |
+| `go.mod` | `require` block |
+
+### 11.5 Limits (defaults)
+
+| Limit | Default |
+|-------|---------|
+| `max_excerpt_files` | 50 |
+| `max_lines_per_file` | 200 |
+| `recent_commits` | 30 |
+| `tree_max_depth` | 3 |
+
+---
+
+## 12. GitHub Issues Adapter (v0.1.1)
+
+### 12.1 Auth
+
+- `gh auth token` via `gh` CLI, OR
+- `GITHUB_TOKEN` env var
+
+### 12.2 Ingest
+
+- GraphQL or REST: open issues up to `max_issues`
+- Fields: `id`, `number`, `title`, `state`, `labels`, `updated_at`, `url`
+- Body: first 500 chars as excerpt; link for full text
+- Digest: `sha256(sorted issue id:updated_at:labels)`
+
+### 12.3 PROJECT_CONTEXT section
+
+Under **Open Issues & Active Work:**
+
+```markdown
+- #42 [bug] Login redirect loop (https://github.com/org/repo/issues/42)
+```
+
+Cap display at 20 issues in Markdown; full set remains in graph.
+
+---
+
+## 13. Policy & Secret Redaction (v0.1.1)
+
+### 13.1 Denylist globs
+
+Never ingest content from paths matching `policy.denylist_globs`.
+
+### 13.2 Redaction patterns (`default` pack)
+
+| Pattern ID | Detects |
+|------------|---------|
+| `aws_access_key` | `AKIA[0-9A-Z]{16}` |
+| `pem_block` | `-----BEGIN .* PRIVATE KEY-----` |
+| `slack_token` | `xox[baprs]-...` |
+| `github_token` | `ghp_`, `github_pat_` |
+| `jwt` | `eyJ...` (heuristic) |
+
+**On match:** Replace with `[REDACTED:pattern_id]` in excerpts; emit `secret_risk` metadata on node (not in Markdown).
+
+### 13.3 Issue body sanitization
+
+Strip HTML; treat issue content as **untrusted** (agent prompt-injection risk). Add `provenance.untrusted = true`.
 
 ---
 
 ## 14. Drift Engine
 
-### 14.1 What counts as drift
-
-| Signal | Severity default |
-|--------|------------------|
-| `content_hash` changed | info |
-| README / Overview source changed | medium |
-| Dependency major bump / new direct dep | medium–high |
-| Auth path files changed | high |
-| New/closed issues beyond threshold | low–medium |
-| Manifest schema mismatch | high |
-| Secret redaction policy hit new paths | high |
-
-### 14.2 Recommendations
-
-- Severity levels: `info | low | medium | high | critical`.
-- Config: `fail_on = ["high","critical"]` for CI.
-- Don’t fail CI on every new issue; use thresholds / label filters (`architecture`, `security`).
-- Emit structured drift events for SaaS webhooks: `axictx.drift.detected`.
-
-### 14.3 When to run
-
-| Mode | Recommendation |
-|------|----------------|
-| Local pre-commit hook | **Off by default**; `axictx init` offers opt-in |
-| Pre-push | Optional |
-| CI on PR | **On by default in docs template** |
-| Nightly SaaS | Hosted customers |
-
----
-
-## 15. Query & Embeddings
-
-### 15.1 MVP query
-
-**Recommendation:** Hybrid **FTS (SQLite) + structured graph navigation**; embeddings optional.
-
-- Without embeddings: still useful via topics, paths, labels, keywords.
-- With embeddings: improve `axictx query` quality.
-
-### 15.2 Embedding model recommendation
-
-| Option | Verdict |
-|--------|---------|
-| Ship large local LLM embedder in binary | No — size bomb |
-| Default **no embeddings**; FTS-only | Good for day-1 |
-| Optional download of small model (e.g. ~20–50MB ONNX / GGUF class) on first `query` | **Best** |
-| Cloud embeddings (OpenAI etc.) | Opt-in only; never default for OSS privacy |
-
-Store `embedding_model` in manifest; changing model invalidates embedding cache.
-
-### 15.3 Token budgeting
-
-- Server-side packing: overview → decisions → matching modules → excerpts.
-- Deduplicate overlapping excerpts.
-- Always reserve tokens for provenance lines.
-
----
-
-## 16. Configuration
-
-### 16.1 `config.toml` (recommended shape)
-
-```toml
-schema_version = "1.0.0"
-
-[project]
-name = ""                          # autodetected if empty
-default_branch = "main"
-
-[project_context]
-path = "PROJECT_CONTEXT.md"
-commit = true
-max_chars = 80000
-llm_polish = false
-
-[serve]
-host = "127.0.0.1"
-port = 8787
-api_token = ""                     # empty = no auth (loopback only)
-
-[drift]
-fail_on = ["high", "critical"]
-ignore_paths = ["**/dist/**", "**/coverage/**"]
-
-[adapters.git]
-enabled = true
-important_path_globs = ["README*", "docs/**", "**/auth/**"]
-recent_commits = 30
-
-[adapters.github_issues]
-enabled = false
-state = "open"
-max_issues = 100
-label_include = []                 # empty = all
-
-[query]
-max_tokens_default = 4000
-embeddings = "auto"                # off | auto | required
-
-[cloud]
-enabled = false
-workspace = ""
-endpoint = "https://api.latticeag.com"
-
-[policy]
-denylist_globs = ["**/.env", "**/*secret*", "**/credentials*"]
-redact_patterns = ["default"]      # named packs
-```
-
-Env overrides: `AXICTX_*`, standard `GITHUB_TOKEN`.
-
----
-
-## 17. Security, Privacy & Trust
-
-### 17.1 Local mode
-
-- Loopback-only API by default.
-- No telemetry unless explicit opt-in (`axictx telemetry enable`) — **recommendation: off entirely in MVP**; add anonymous counters later only with clear prompt.
-- Caches gitignored.
-- `doctor` warns if serve bound to `0.0.0.0` without token.
-
-### 17.2 Secrets
-
-- Deny path globs + regex redaction pack (AWS keys, PEMs, Slack tokens, etc.).
-- Never put raw `.env` into graph.
-- Cloud bundles: encrypt **before** upload; LatticeAG ciphertext-only storage.
-
-### 17.3 Hosted encryption recommendation
-
-- **Envelope encryption:** per-workspace data key; customer passphrase or KMS/BYOK wraps data key.
-- AES-256-GCM for bundles; TLS 1.3 in transit.
-- **Beta claim:** “LatticeAG cannot read plaintext context” only if keys are customer-controlled — do not market zero-knowledge if server-managed keys exist. Be honest:  
-  - **Tier A (default hosted):** server-managed keys + strict access control (simpler UX).  
-  - **Tier B (enterprise):** BYOK / customer-held keys (true limited visibility).  
-- **Recommendation:** Ship Tier A for invite beta with clear docs; design bundle format for Tier B from day one.
-
-### 17.4 Supply chain
-
-- Signed GitHub Release binaries (sigstore/cosign).
-- SBOM for releases.
-- Minimal dependency surface in CLI.
-
-### 17.5 Threat model (document in SECURITY.md)
-
-Actors: local malware, malicious adapter config, compromised SaaS, curious LatticeAG operator, prompt-injection via issue bodies.
-
-**Mitigations:** sanitize issue HTML/Markdown into plain text; mark untrusted node content; agents should treat issue-derived context as untrusted input.
-
----
-
-## 18. Hosted SaaS (LatticeAG) Spec
-
-### 18.1 Beta posture
-
-- Invite-only.
-- Free during beta.
-- Feature focus: encrypted push/pull, workspace membership, drift webhooks, basic audit log — **not** a heavy analytics suite.
-
-### 18.2 Resources
-
-- Workspace, members, invites, repos, bundles, webhook endpoints, API keys (machine), audit events.
-
-### 18.3 Recommended infra (aligned with existing draft)
-
-- Cloudflare Workers + Durable Objects + R2 for bundles/metadata.
-- GitHub App for managed sync (post-MVP).
-- Queue for drift evaluation jobs.
-
-### 18.4 API (hosted, sketch)
-
-```http
-POST /v1/workspaces
-POST /v1/workspaces/:id/invites
-POST /v1/repos/:id/bundles   # upload encrypted
-GET  /v1/repos/:id/bundles/latest
-POST /v1/webhooks
-GET  /v1/audit
-```
-
-CLI maps to these via `axictx cloud *`.
-
-### 18.5 Dashboard (minimal)
-
-- List repos + last sync + last drift severity.
-- Invite codes / members.
-- Webhook config.
-- Audit log table.
-
-**Recommendation:** Defer polished UI; CLI-first beta is fine. A thin admin page is enough.
-
----
-
-## 19. Deployment & Distribution
-
-### 19.1 OSS
-
-- npm: `@latticeag/axicontext` (CLI via `bin`).
-- Homebrew tap (LatticeAG).
-- GitHub Releases: platform binaries.
-- Optional Docker image for `serve` in Compose.
-
-### 19.2 Offline
-
-- After sync + optional model download, query/serve work offline.
-- Cloud commands fail gracefully offline.
-
-### 19.3 Self-host
-
-- Document single-node Docker Compose for teams that want shared LAN server **without** LatticeAG SaaS (graph served behind their auth).  
-- Full multi-tenant self-host of SaaS control plane is **non-goal** for year one (support cost).
-
----
-
-## 20. Architecture
+### 14.1 Drift kinds
+
+| Kind | Severity default | Detection |
+|------|------------------|-----------|
+| `manifest.missing` | critical | No manifest.json |
+| `adapter.digest.changed` | medium | Any adapter digest differs |
+| `content_hash.changed` | info | Graph content hash differs |
+| `readme.changed` | medium | README sha differs |
+| `dependencies.changed` | medium | Direct dep set differs |
+| `dependency.added` | medium | New direct dependency |
+| `dependency.removed` | low | Removed direct dependency |
+| `auth_paths.changed` | high | Auth-related path set differs |
+| `file_tree.changed` | info | Tree digest differs |
+| `project_context_hash.changed` | low | Markdown projection changed |
+
+### 14.2 Severity config
+
+`config.drift.fail_on` default: `["high", "critical"]`.
+
+### 14.3 CI GitHub Actions annotations
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                         Sources                             │
-│  git repo │ GitHub Issues │ Linear │ Docs │ (Notion…)       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-         ┌───────────▼────────────┐
-         │   Source Adapters      │  (plugins, isolated failures)
-         └───────────┬────────────┘
-                     │
-         ┌───────────▼────────────┐
-         │   Policy / Redaction   │
-         └───────────┬────────────┘
-                     │
-         ┌───────────▼────────────┐
-         │    Context Graph       │  SQLite + manifest
-         └───────────┬────────────┘
-                     │
-     ┌───────────────┼────────────────────────┐
-     ▼               ▼                        ▼
-PROJECT_CONTEXT.md  Drift Engine      Agent Read API / MCP / SDK
-     ▼               ▼                        ▼
-  git commit     CI annotations      Cursor / Claude / Copilot / Poly
-                     │
-         ┌───────────▼────────────┐
-         │ Hosted SaaS Sync (opt) │  encrypted bundles, webhooks
-         └────────────────────────┘
+::warning file=PROJECT_CONTEXT.md,line=1,title=AxiContext Drift::readme.changed - README content changed since last sync
+::error file=.axicontext/manifest.json,line=1,title=AxiContext Drift::manifest.missing - run axictx sync
 ```
 
-### 20.1 Recommended tech stack (MVP)
+### 14.4 Drift report schema
 
-| Layer | Choice | Rationale |
-|-------|--------|-----------|
-| Language | **TypeScript (Node 22+)** | Speed of CLI/SDK shipping; agent ecosystem is TS-heavy |
-| CLI framework | **citty or commander** + **consola** | Lightweight |
-| HTTP | **Hono** or Node `http` | Tiny local server |
-| DB | **better-sqlite3** or **libsql** | Local graph/FTS |
-| Config | TOML (`smol-toml` / `@iarajs/toml`) | Human-friendly |
-| Validation | **Zod** | Share with SDK |
-| Tests | **Vitest** | Fast |
-| CI | GitHub Actions | Native drift annotations |
-| Hosted | Cloudflare Workers + DOs + R2 | Fits LatticeAG draft; global edge |
-| Package | pnpm monorepo optional | `packages/cli`, `packages/sdk`, `packages/graph`, `packages/adapters-*` |
+```typescript
+interface DriftReport {
+  status: "ok" | "drift";
+  severity: DriftSeverity;
+  generated_at: string;
+  changes: DriftChange[];
+  summary: { total_changes: number; by_severity: Record<DriftSeverity, number> };
+}
 
-**Alternative considered:** Rust CLI — better single binary, slower MVP. Revisit after product-market fit.
-
-### 20.2 Monorepo layout recommendation
-
-```text
-/
-  SPEC.md
-  README.md
-  LICENSE
-  packages/
-    cli/
-    sdk/
-    core/          # graph, sync, drift, policy
-    adapters-git/
-    adapters-github/
-    server/        # serve + openapi
-  apps/
-    hosted-api/    # SaaS (private or same repo gated)
-  examples/
-  docs/
+interface DriftChange {
+  kind: string;
+  severity: DriftSeverity;
+  detail: string;
+  path?: string;
+}
 ```
-
-**Recommendation:** Keep hosted API in-repo but clearly separated; avoid early polyrepo tax.
 
 ---
 
-## 21. Integrations
+## 15. Query Engine
 
-### 21.1 Cursor
+### 15.1 MVP (v0.1): FTS keyword search
 
-- Document rule snippet: read `PROJECT_CONTEXT.md` first; optional MCP.
-- Example `.cursor/rules` fragment in docs (user opts in).
+```text
+1. Tokenize question → FTS query (AND terms)
+2. Rank excerpts by BM25 / fts5 rank
+3. Boost excerpts whose node matches topic keywords in path
+4. Pack into max_tokens budget
+5. Return { question, answer_context[], tokens_used }
+```
 
-### 21.2 Claude Code
+### 15.2 Response shape
 
-- `CLAUDE.md` pointer: “Defer to PROJECT_CONTEXT.md for living truth; do not duplicate.”
+```typescript
+interface QueryResult {
+  question: string;
+  answer_context: Array<{
+    text: string;
+    path: string;
+    start_line?: number;
+    end_line?: number;
+    tokens: number;
+    provenance: Provenance;
+  }>;
+  tokens_used: number;
+  manifest_version: string;
+}
+```
 
-### 21.3 GitHub Actions
+### 15.3 v0.2: optional embeddings
+
+- `query.embeddings = auto` triggers one-time model download (~30MB).
+- Hybrid rerank: FTS candidates → embedding cosine rerank.
+- **Never default on** for privacy and binary size.
+
+---
+
+## 16. Agent Read API
+
+### 16.1 Base URL
+
+`http://127.0.0.1:8787` (default)
+
+### 16.2 Endpoints
+
+#### `GET /healthz`
+
+```json
+{ "status": "ok", "host": "127.0.0.1", "repo_path": "/abs/path" }
+```
+
+#### `GET /v1/manifest`
+
+Returns `manifest.json` or `404` with guidance to run sync.
+
+#### `GET /v1/context?cursor=&limit=`
+
+Paginated graph summary:
+
+```json
+{
+  "manifest": { ... },
+  "nodes": [ ... ],
+  "next_cursor": "opaque" | null
+}
+```
+
+Default `limit=100`.
+
+#### `GET /v1/context/slice?topic=&depth=2&max_tokens=2000`
+
+Returns `GraphSlice` (§8.7).
+
+#### `POST /v1/context/query`
+
+```json
+// Request
+{ "question": "How does auth work?", "max_tokens": 4000, "include": ["code", "issues"] }
+
+// Response
+{ "question": "...", "answer_context": [...], "tokens_used": 1234, "manifest_version": "1.0.0" }
+```
+
+#### `GET /v1/drift`
+
+Returns `DriftReport`.
+
+#### `GET /v1/openapi.json`
+
+OpenAPI 3.1 spec for all routes.
+
+### 16.3 Auth
+
+- If `serve.api_token` set: require `Authorization: Bearer <token>` OR `X-API-Token: <token>` on `/v1/*`.
+- If empty: no auth (only valid with loopback bind).
+
+### 16.4 Caching headers
+
+- `GET /v1/manifest` and `GET /v1/context`: `ETag` from `content_hash`; honor `If-None-Match`.
+
+### 16.5 MCP wrapper (v0.2 — specified now, build later)
+
+Package: `@latticeag/axicontext-mcp`
+
+| Tool | Behavior |
+|------|----------|
+| `get_project_context` | slice topic=`overview`, depth=1 |
+| `query_context` | POST /v1/context/query |
+| `get_drift` | GET /v1/drift |
+| `get_manifest` | GET /v1/manifest |
+
+---
+
+## 17. TypeScript SDK
+
+### 17.1 Public API
+
+```typescript
+import { AxiContext } from "@latticeag/axicontext-sdk";
+
+const ctx = await AxiContext.fromRepo(".");
+
+await ctx.sync();
+const manifest = await ctx.getManifest();
+const slice = await ctx.slice({ topic: "authentication", depth: 2, maxTokens: 2000 });
+const answer = await ctx.query({ question: "How do I add OAuth?", maxTokens: 4000 });
+const drift = await ctx.drift();
+
+// Optional: connect to running server instead of in-process
+const remote = await AxiContext.connect({ baseUrl: "http://127.0.0.1:8787" });
+```
+
+### 17.2 Implementation modes
+
+| Mode | When |
+|------|------|
+| In-process | CLI/library calls core directly |
+| HTTP client | `connect()` talks to `axictx serve` |
+
+**Recommendation:** Single SDK package; transport is an implementation detail.
+
+---
+
+## 18. Security Model (OSS)
+
+### 18.1 Threats
+
+| Threat | Mitigation |
+|--------|------------|
+| Local API exposed to LAN | Default loopback; refuse `0.0.0.0` without token |
+| Secrets in PROJECT_CONTEXT.md | Denylist + redaction + docs |
+| Prompt injection via issues | `untrusted` provenance flag |
+| SQLite corruption | WAL mode; backup on sync |
+| Dependency confusion in adapters | Pin versions; minimal deps |
+
+### 18.2 Telemetry
+
+**OSS v0.1: none.** No analytics SDK. Optional anonymous crash reports only after explicit opt-in in a future version.
+
+### 18.3 Supply chain
+
+- GitHub Actions: build, test, sign release artifacts (sigstore cosign — v0.1.1).
+- SBOM per release (v0.1.1).
+
+---
+
+## 19. Testing Strategy
+
+### 19.1 Test pyramid
+
+| Layer | Location | Focus |
+|-------|----------|-------|
+| Unit | `packages/*/test/` | config, hash stability, redaction, graph ops |
+| Adapter | `packages/adapters-*/test/` | fixture repos |
+| Integration | `/tests/` | HTTP routes, drift E2E |
+| Golden | `testdata/expected/` | Markdown structure hashes |
+
+### 19.2 Fixture repos
+
+#### `testdata/fixtures/minimal-node-repo/`
+
+- `package.json` with express, typescript
+- `src/auth/session.ts`
+- `README.md`
+- 3 commits
+- **Expected:** 17 nodes, 19 edges, architecture bullets for auth + express
+
+#### `testdata/fixtures/minimal-python-repo/` (v0.1.1)
+
+- `pyproject.toml`, `src/mypkg/__init__.py`
+
+#### `testdata/fixtures/drift-seed-repo/` (v0.1.1)
+
+- Prebuilt manifest; test mutates README → expect `readme.changed` medium
+
+### 19.3 Golden hash tests
+
+- `PROJECT_CONTEXT.md` section headings order must not change without semver bump.
+- `content_hash` stable across OS for same fixture (posix paths normalized).
+
+### 19.4 CI workflow (`.github/workflows/ci.yml`)
 
 ```yaml
-# recommended template
-- uses: latticeag/axicontext-action@v1  # future
-  with:
-    fail-on-drift: true
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: pnpm install
+      - run: pnpm build
+      - run: pnpm test
+      - run: |
+          cd testdata/fixtures/minimal-node-repo
+          npx axictx sync
+          npx axictx drift --ci --fail-on-drift
 ```
 
-Until action exists: `npm i` + `npx axictx drift --ci --fail-on-drift`.
+---
 
-### 21.4 LatticeAG series
+## 20. Distribution
 
-| Product | Relationship |
-|---------|--------------|
-| **Poly** | Consumes Agent Read API as context provider for orchestration |
-| **Lex** | Optional LLM polish / query reformulation — never required for core sync |
-| **Vek** | Optional remote vector index for large orgs; local FTS remains default |
-| **Vis** | Graph visualization of Context Graph |
+### 20.1 Channels (v0.1 launch)
 
-**Boundary rule:** AxiContext does not schedule agents, fine-tune models, or own general-purpose search UX.
+1. **npm:** `@latticeag/axicontext` (CLI + core bundled)
+2. **GitHub Releases:** optional platform binaries via `pkg` or `bun build --compile` (v0.1.1)
+3. **Homebrew tap:** `latticeag/tap/axicontext` (v0.1.1)
+
+### 20.2 Versioning
+
+- Semver for all packages; lockstep `0.1.x` during alpha.
+- `schema_version` in graph/manifest is independent (graph schema semver).
 
 ---
 
-## 22. Non-Goals
+## 21. Documentation Deliverables
 
-### MVP non-goals
+| Doc | Audience | Priority |
+|-----|----------|----------|
+| README quickstart | all | P0 |
+| `docs/install.md` | users | P0 |
+| `docs/config.md` | users | P0 |
+| `docs/agent-integration.md` | Cursor/Claude authors | P0 |
+| `docs/ci.md` | DevEx | P0 |
+| `docs/schema.md` | adapter authors | P1 |
+| `docs/security.md` | security reviewers | P1 |
+| `CONTRIBUTING.md` | contributors | P1 |
+| `SECURITY.md` | researchers | P1 |
 
-- Real-time collaborative editing of context
-- Fine-grained ACL inside OSS CLI
-- Replacing Glean / Sourcegraph / Elasticsearch
-- Code generation / autonomous coding
-- Mobile apps
-- Slack as a primary knowledge base (too noisy)
-- Guaranteeing perfect architecture prose without human override fields
-- Multi-tenant self-hosted SaaS appliance
+### 21.1 Cursor integration snippet (docs)
 
-### Explicit forever-careful
-
-- Training LatticeAG models on customer context — **default no; contractual no for paid**
-- Reading customer plaintext with server-managed keys without audit — minimize; prefer BYOK for sensitive customers
-
----
-
-## 23. MVP Milestones (execution plan)
-
-> Note: Prior draft used a compressed “6 days” framing. Below is the same spirit as an **engineering sequence**, not a calendar promise. Scope is intentionally MVP-tight.
-
-### Milestone A — Foundation
-
-- Repo scaffold, MIT, TS monorepo, `axictx` skeleton
-- `init`, `config.toml`, directory layout, `doctor`
-
-### Milestone B — Git → Graph → Markdown
-
-- Git adapter + SQLite/JSON graph v1
-- `PROJECT_CONTEXT.md` generator (deterministic)
-- `sync` + `manifest.json`
-
-### Milestone C — Agent Read API + SDK
-
-- `serve` endpoints + OpenAPI
-- TS SDK `fromRepo` / `slice` / `query` (FTS)
-- Example Cursor/Claude snippets in docs
-
-### Milestone D — Drift + CI
-
-- Drift engine + `drift --ci`
-- GitHub Action example workflow
-- Exit codes + SARIF optional
-
-### Milestone E — GitHub Issues + Policy
-
-- Issues adapter
-- Redaction/denylist policy pack
-- Query improvements
-
-### Milestone F — Cloud skeleton + polish
-
-- Invite-only `cloud login|push|pull`
-- Bundle encryption format v1
-- Quickstart, SECURITY.md, demo script
-- Decision log for open questions below
-
-**Cut line if slipping:** Hosted push/pull can ship as “format + mock endpoint” behind feature flag; do not block local excellence on SaaS UI.
+```markdown
+# .cursor/rules/project-context.mdc
+Always read PROJECT_CONTEXT.md before making architectural changes.
+For structured context, prefer the local AxiContext API at http://127.0.0.1:8787/v1/context/slice.
+```
 
 ---
 
-## 24. Pricing & Packaging (post-beta recommendation)
+## 22. Implementation Milestones
 
-### OSS
+### M0 — Scaffold ✅ (done)
 
-- Free MIT: full local product surface (§0 table).
+- [x] pnpm monorepo
+- [x] config.toml + zod
+- [x] init / doctor
+- [x] Git adapter
+- [x] sync + PROJECT_CONTEXT.md
+- [x] drift + serve + query + status
+- [x] Hono API
+- [x] minimal fixture + tests
 
-### Hosted (post-beta starting point)
+### M1 — Consolidation (current sprint)
 
-| Tier | Price (rec.) | Includes |
-|------|--------------|----------|
-| Beta | $0 invite | Encrypted sync, 1–2 repos, webhooks experimental |
-| Team | **$16/seat/mo** (anchor; was $12–29 band) | N repos, drift alerts, audit, 30-day retention |
-| Enterprise | Sales | BYOK, SSO, custom adapters, retention, MSA |
+- [ ] Single CLI entry (`axictx-cli.ts` has all commands)
+- [ ] Merge `graphStore.ts` / `graph-store.ts` into one implementation
+- [ ] Wire sync pipeline to SQLite GraphStore (not parallel in-memory store)
+- [ ] Add `adapters-git` to build graph
+- [ ] Root `pnpm build` builds all packages
+- [ ] CI workflow
+- [ ] README quickstart accurate
 
-**Packaging principle:** Meter **repos + seats + retention + managed sync minutes**, not query counts (queries should feel free locally forever).
+**Acceptance:** `axictx init && axictx sync && axictx drift && axictx serve` works E2E on `minimal-node-repo`.
 
-### Value props (measurable claims — validate in beta)
+### M2 — OSS v0.1.0 release
 
-- Reduce agent preamble token spend **30–60%** vs full-repo dumps (measure in examples).
-- Onboarding “what is this system?” answerable in **< 10s** via query/slice.
-- Drift catch rate target **≥ 90%** of seeded meaningful changes in test fixtures.
+- [ ] GitHub Issues adapter
+- [ ] Policy / redaction pack
+- [ ] `doctor` graph checks
+- [ ] SARIF drift output
+- [ ] npm publish `@latticeag/axicontext`
+- [ ] Docs P0 set
 
----
+**Acceptance:** External user can install from npm and run without cloning AxiContext repo.
 
-## 25. Go-to-Market & Community
+### M3 — OSS v0.2.0
 
-1. **Launch OSS** with killer demo: before/after token counts on a public repo.
-2. Publish **Context Graph schema** as a small open standard; invite adapter PRs.
-3. Cursor / Claude community posts + example repos.
-4. Invite-only SaaS for design partners (5–15 teams).
-5. Don’t lead with “AI platform”; lead with **less stale context, less token waste, CI drift**.
+- [ ] MCP server package
+- [ ] Optional embeddings download
+- [ ] Linear adapter
+- [ ] `axictx adapters` commands
+- [ ] Python SDK (thin HTTP client)
 
----
+### M4 — Phase 2 SaaS (separate spec)
 
-## 26. Documentation Plan
-
-Must-ship docs:
-
-- README quickstart (5 minutes)
-- `docs/schema.md` — graph + manifest
-- `docs/security.md` — threat model, encryption honesty
-- `docs/adapters.md`
-- `docs/ci.md`
-- `docs/agent-integration.md` (Cursor, Claude, MCP)
-- `docs/cloud.md`
-- `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`
-
----
-
-## 27. Testing Strategy
-
-| Layer | Approach |
-|-------|----------|
-| Unit | Graph merge, redaction, manifest hash stability |
-| Fixture repos | Tiny sample repos in `testdata/` with expected Markdown hashes |
-| Adapter mocks | Recorded GitHub API fixtures |
-| API contract | OpenAPI + Vitest supertest |
-| E2E CLI | `vitest` spawning CLI on fixtures |
-| Drift golden | Mutate fixture → expect severities |
-| Security | Tests that `.env` never enters graph |
-| Cloud | Contract tests against local encrypted round-trip |
-
-**Recommendation:** Snapshot tests for Markdown structure, not for every prose line if LLM polish exists (keep LLM off in CI).
+See Appendix F. Not started.
 
 ---
 
-## 28. Observability
+## 23. Known Tech Debt (from parallel build)
 
-### OSS
-
-- Structured logs to stderr; `--verbose`.
-- No remote telemetry by default.
-
-### SaaS
-
-- Request metrics, sync success rates, drift event counts.
-- Audit log for push/pull/login/invite.
-- Customer-visible status page later.
-
----
-
-## 29. Compliance & Legal
-
-- MIT for OSS.
-- Customer ToS + DPA for SaaS before GA.
-- GDPR: export/delete workspace; EU R2/region story when enterprise asks.
-- Do not ingest customer data into training sets by default; document explicitly.
-- CLA or DCO for contributors — **recommendation: DCO** (lighter).
+| Item | Action |
+|------|--------|
+| Duplicate CLI entrypoints (`bin.ts`, `index.ts`, `axictx-cli.ts`) | Merge into `axictx-cli.ts` |
+| Two GraphStore implementations | Keep `graphStore.ts` (SQLite); migrate sync |
+| `adapters-git` imports core via relative path | Use package dependency + exported types |
+| `sync.ts` in-memory graph vs SQLite | Single SQLite path |
+| Duplicate constants (`constants.ts` / `axicontext-constants.ts`) | Delete duplicates |
+| Server not in default build filter | Fixed: `pnpm -r build` |
+| Exit code `2` for drift | Added `ExitCode.Drift` |
 
 ---
 
-## 30. Risks & Mitigations
+## 24. Performance Budgets
 
-| Risk | Mitigation |
-|------|------------|
-| Generated Markdown is low-quality / generic | Heuristics + manual override fields; optional LLM later |
-| Merge conflict hell on PROJECT_CONTEXT.md | Stable ordering; small file; CI bot PR strategy |
-| Scope creep into full RAG platform | Hard non-goals; adapter plugin model |
-| Secret leakage into committed context | Policy pack + CI secret scan recommendation |
-| SaaS trust concerns | Local-first; honest encryption tiers; invite design partners |
-| Adapter maintenance burden | Few P0 adapters; community P2+ |
-| Competing with vendor-native memories | Standardize on open file + API; be the portable layer |
-
----
-
-## 31. Success Metrics
-
-### Product
-
-- Cold query “what does this project do?” **< 10s** locally on mid-size repo.
-- `sync` **< 30s** for ≤10k files (important-file capped).
-- Drift detection ≥ **90%** on fixture suite.
-- Hosted beta NPS **> 40**.
-
-### Adoption
-
-- GitHub stars / npm downloads (leading indicators).
-- Number of repos with committed `PROJECT_CONTEXT.md` banner hash.
-- Design-partner weekly active syncs.
-
-### Quality
-
-- Zero critical secret-leak reports in beta.
-- SDK/API breaking changes only with semver major.
+| Operation | Target (p95) |
+|-----------|--------------|
+| `init` | < 1s |
+| `sync` (10k files repo) | < 30s |
+| `drift` | < 5s |
+| `query` (FTS) | < 500ms |
+| `GET /v1/context/slice` | < 300ms |
+| SQLite graph size | < 50MB typical |
 
 ---
 
-## 32. Open Questions — with Recommendations
+## 25. Success Metrics (OSS)
 
-| # | Question | Recommendation | Confidence |
-|---|----------|----------------|------------|
-| 1 | Commit `PROJECT_CONTEXT.md` or artifact-only? | **Commit by default**; config to disable | High |
-| 2 | Embedding model in OSS binary? | **FTS default; optional small model download** | High |
-| 3 | Drift on every commit hook? | **CI default; hooks opt-in** | High |
-| 4 | Adapter priority after Git + Issues? | **Linear + markdown/ADR docs** | High |
-| 5 | Multi-repo graph? | **OSS = one repo; SaaS workspace links repos** | High |
-| 6 | LLM-generated architecture prose in MVP? | **No by default; `--llm` opt-in later** | High |
-| 7 | MCP server timing? | **v0.2 right after HTTP API** | High |
-| 8 | SQLite vs JSONL graph? | **SQLite near-term; JSONL export** | High |
-| 9 | Hosted encryption tier for beta? | **Server-managed keys + design for BYOK; honest docs** | Medium |
-| 10 | Monorepo package manager? | **pnpm** | Medium |
-| 11 | Should cloud be separate private repo? | **Same repo, `apps/hosted-api`, clear boundaries** | Medium |
-| 12 | Name lock: AxiContext vs axictx vs Axi Memory? | **Product AxiContext, CLI `axictx`, npm `@latticeag/axicontext`** | High |
-| 13 | gRPC? | **Defer; HTTP+MCP enough** | High |
-| 14 | Windows first-class? | **Yes for CLI paths; CI matrix later** | Medium |
-| 15 | Auto-PR updating context? | **Post-MVP; powerful for enterprises** | Medium |
-
-### Questions for you (product owner)
-
-Answer when convenient; SPEC already encodes recommendations above:
-
-1. **Brand:** Confirm **AxiContext** / LatticeAG series naming is final for public launch.
-2. **Encryption honesty:** Prefer simpler Tier A beta UX, or delay cloud until BYOK Tier B is ready?
-3. **Design partners:** Do you already have 3–5 invite teams, or should GTM assume OSS-only for first weeks?
-4. **Primary agent surface:** Optimize first demo for **Cursor MCP**, **Claude Code**, or **raw HTTP**?
-5. **Monorepo ambitions:** Is LatticeAG planning a single “Axi” umbrella repo soon, or keep AxiContext standalone?
-6. **Languages:** Any must-have non-TS customer (Go/Java shop) for beta that should affect beachhead?
-7. **SaaS region / Cloudflare:** Confirm Cloudflare stack is the org standard.
-8. **Budget posture:** Is hosted beta allowed to be loss-leading (recommended: yes)?
+| Metric | Target |
+|--------|--------|
+| Cold `query` "what is this project?" | < 10s end-to-end including sync on small repo |
+| Drift fixture recall | ≥ 90% of seeded changes detected |
+| Secret leak in test suite | 0 |
+| npm install + init + sync success rate | > 95% on supported platforms |
 
 ---
 
-## 33. Acceptance Criteria for “Spec Complete → Build”
+## 26. Open Questions for Product Owner
 
-Planning is sufficient to start Milestone A when:
+Spec includes recommendations; confirm or override:
 
-- [x] Hybrid model decided and open-core boundary written
-- [x] MVP command/API list frozen
-- [x] Graph node/edge types v1 listed
-- [x] Security posture and encryption honesty documented
-- [x] Non-goals explicit
-- [x] Milestone cut line defined
-- [ ] Product owner confirms or overrides §32 recommendations (esp. commit Markdown, encryption tier, first agent surface)
+| # | Question | Recommendation |
+|---|----------|----------------|
+| 1 | Commit `PROJECT_CONTEXT.md`? | **Yes** (default) |
+| 2 | Commit `manifest.json`? | **Yes** |
+| 3 | Graph sqlite in gitignore? | **Yes** |
+| 4 | First agent integration doc target? | **Cursor rules + HTTP slice** |
+| 5 | GitHub Issues in v0.1.0 or v0.1.1? | **v0.1.1** (don't block first npm publish) |
+| 6 | MCP in v0.1 or v0.2? | **v0.2** |
+| 7 | Package scope on npm? | **`@latticeag/axicontext`** |
 
 ---
 
-## 34. Appendix A — Example Agent Slice Response (illustrative)
+## Appendix A — JSON Schema: Node (excerpt)
 
 ```json
 {
-  "topic": "authentication",
-  "max_tokens": 2000,
-  "nodes": [
-    { "id": "module:src/auth", "type": "module", "path": "src/auth" },
-    { "id": "decision:adr-0003", "type": "decision", "title": "Use OAuth2 + sessions" }
-  ],
-  "snippets": [
-    {
-      "text": "OAuth providers are registered in src/auth/providers.ts ...",
-      "provenance": {
-        "adapter": "git",
-        "path": "src/auth/providers.ts",
-        "start_line": 1,
-        "end_line": 40,
-        "commit": "abc123"
-      }
-    }
-  ],
-  "manifest_version": "1.0.0",
-  "content_hash": "sha256:…"
+  "$id": "https://axicontext.dev/schemas/v1/node.json",
+  "type": "object",
+  "required": ["id", "type", "data", "created_at", "updated_at"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z]+:[a-zA-Z0-9._/-]+$" },
+    "type": { "enum": ["project", "module", "file", "dependency", "issue", "doc", "decision", "commit", "tree_digest", "person"] },
+    "data": { "type": "object" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
 }
 ```
 
-## 35. Appendix B — Drift JSON (illustrative)
-
-```json
-{
-  "status": "drift",
-  "severity": "high",
-  "changes": [
-    {
-      "kind": "dependency.added",
-      "severity": "medium",
-      "detail": "added direct dep jose@5.2.0"
-    },
-    {
-      "kind": "file.changed",
-      "severity": "high",
-      "path": "src/auth/session.ts"
-    }
-  ]
-}
-```
-
-## 36. Appendix C — Glossary
-
-- **Open-core:** OSS core product + commercial hosted features.
-- **Projection:** Derived view (Markdown) of canonical graph.
-- **Digest:** Hash summarizing adapter inputs for drift.
-- **Policy pack:** Named redaction/deny ruleset.
-- **Bundle:** Encrypted portable context artifact for SaaS.
+Full schemas exported via `axictx schema print` (v0.2).
 
 ---
 
-## 37. Document Control
+## Appendix B — Example `axictx sync` stdout
 
-| Version | Date | Notes |
-|---------|------|-------|
-| 0.1.0-draft | 2026-07-11 | Initial SPEC (problem, MVP sketch, hybrid lean) |
-| 0.2.0-draft | 2026-07-11 | Full planning expansion: OSS/SaaS/Hybrid decision, open-core boundary, journeys, graph schema, adapters, security tiers, SaaS, GTM, risks, recommendations on all open questions |
+```json
+{
+  "manifestPath": ".axicontext/manifest.json",
+  "projectContextPath": "PROJECT_CONTEXT.md",
+  "adapters": ["git"],
+  "warnings": [],
+  "stats": { "node_count": 17, "edge_count": 19, "duration_ms": 842 }
+}
+```
 
-**Next step after owner review:** Freeze v1.0.0-spec → begin Milestone A (scaffold only). **No application code in this planning phase.**
+---
+
+## Appendix C — Example Drift Markdown
+
+```markdown
+# AxiContext Drift Report
+
+- status: **drift**
+- severity: **medium**
+- generated_at: `2026-07-11T13:30:52.294Z`
+- total_changes: 2
+
+## Changes
+- [medium] `readme.changed` — README content changed since last sync
+- [medium] `dependency.added` — added direct dep jose@5.2.0
+```
+
+---
+
+## Appendix D — File Module Map (`packages/core`)
+
+| File | Responsibility |
+|------|----------------|
+| `constants.ts` | paths, defaults, exit codes |
+| `config.ts` | TOML load/validate |
+| `init.ts` | scaffold `.axicontext/` |
+| `graphStore.ts` | SQLite graph (canonical) |
+| `graph-types.ts` | Zod schemas |
+| `schema.ts` | DDL |
+| `hash.ts` | sha256 + stable stringify |
+| `sync.ts` | orchestrate adapters → graph → manifest → md |
+| `project-context.ts` | Markdown generator |
+| `drift.ts` | drift engine |
+| `query.ts` | FTS query |
+| `context.ts` | manifest readers, context summary |
+| `client.ts` | SDK server/in-process bridge |
+| `fs-utils.ts` | safe file walks |
+| `types.ts` | shared adapter types |
+
+---
+
+## Appendix E — Cursor / Claude Integration Patterns
+
+### E.1 Static (zero daemon)
+
+```markdown
+# CLAUDE.md
+Read PROJECT_CONTEXT.md first. It is the canonical project memory generated by AxiContext.
+Do not duplicate architecture facts elsewhere.
+```
+
+### E.2 Dynamic (daemon)
+
+1. `axictx serve` in devcontainer / local
+2. Agent tool calls `GET /v1/context/slice?topic=auth&max_tokens=2000`
+3. Agent reads provenance paths for detail edits only
+
+### E.3 CI enforcement
+
+```yaml
+- name: AxiContext drift check
+  run: npx axictx drift --ci --fail-on-drift
+```
+
+---
+
+## Appendix F — Phase 2 Hosted SaaS (deferred)
+
+**Not in scope for current build.** Preserved for strategic context only.
+
+Future capabilities:
+
+- `axictx cloud login|push|pull`
+- Encrypted context bundles (AES-256-GCM)
+- Workspace RBAC, invites, audit logs
+- Drift webhooks → Slack
+- Managed adapter runners
+- SSO / BYOK enterprise tier
+
+OSS design constraints to preserve for future SaaS:
+
+- Bundle format must be exportable from `axictx export` without cloud.
+- Manifest and graph schema remain open.
+- Cloud never required for local agent workflows.
+
+---
+
+## Appendix G — Document Control
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.1.0-draft | 2026-07-11 | Initial problem + MVP sketch |
+| 0.2.0-draft | 2026-07-11 | Full hybrid planning spec |
+| 1.0.0-oss-draft | 2026-07-11 | **OSS scope lock**, implementation-grade detail, monorepo status, parallel build landed, SaaS deferred to Appendix F |
+
+**Next action:** Complete M1 consolidation → M2 npm release.

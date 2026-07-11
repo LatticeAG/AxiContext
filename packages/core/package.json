@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "@latticeag/axicontext-adapter-git": "workspace:*",
     "zod": "^3.25.76"
   }
 }

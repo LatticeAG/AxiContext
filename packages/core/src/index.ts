@@ -6,3 +6,7 @@ export * from "./drift.js";
 export * from "./client.js";
 export * from "./constants.js";
 export * from "./init.js";
+export { runSync } from "./sync.js";
+export { generateProjectContext } from "./project-context.js";
+export { GraphStore } from "./graph-store.js";
+export { exportJsonSchemas } from "./graph-types.js";

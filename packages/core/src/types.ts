@@ -155,3 +155,83 @@ export interface InitResult {
   createdProjectContext: boolean;
   missingGitignoreEntries: string[];
 }
+
+// --- Sync / adapter types (OSS graph pipeline) ---
+
+export interface GraphNode {
+  id: string;
+  type: string;
+  attributes: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  type: string;
+  attributes?: Record<string, unknown>;
+}
+
+export interface RepoContext {
+  repoRoot: string;
+}
+
+export interface ResolvedSyncConfig {
+  maxChars: number;
+  maxFiles: number;
+  maxLinesPerFile: number;
+  maxTreeDepth: number;
+  maxCommits: number;
+  manifestPath: string;
+  projectContextPath: string;
+  adapterIds?: string[];
+}
+
+export type SyncConfig = Partial<ResolvedSyncConfig>;
+
+export interface IngestContext extends RepoContext {
+  config: ResolvedSyncConfig;
+}
+
+export interface AdapterResult {
+  adapterId: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  digest: string;
+  warnings: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface SourceAdapter {
+  readonly id: string;
+  detect(ctx: RepoContext): Promise<boolean>;
+  ingest(ctx: IngestContext): Promise<AdapterResult>;
+}
+
+export interface SyncManifest {
+  schema_version: string;
+  generated_at: string;
+  project_root: string;
+  content_hash: string;
+  adapters: Record<
+    string,
+    {
+      digest: string;
+      warnings: string[];
+      node_count: number;
+      edge_count: number;
+      metadata: Record<string, unknown>;
+    }
+  >;
+  stats: {
+    node_count: number;
+    edge_count: number;
+  };
+}
+
+export interface SyncResult {
+  manifestPath: string;
+  projectContextPath: string;
+  manifest: SyncManifest;
+  projectContext: string;
+  warnings: string[];
+}
