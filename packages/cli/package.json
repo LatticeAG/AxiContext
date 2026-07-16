@@ -29,6 +29,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@latticeag/axicontext-adapter-git": "workspace:*",
     "@latticeag/axicontext-core": "workspace:*",
     "@latticeag/axicontext-server": "workspace:*",
     "commander": "^14.0.0"
