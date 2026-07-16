@@ -1,0 +1,3 @@
+# Minimal Rust Fixture
+
+Small Rust library used by AxiContext parser and sync tests.

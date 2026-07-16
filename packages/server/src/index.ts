@@ -6,7 +6,7 @@ import {
   detectDrift,
   getContextPage,
   getContextSlice,
-  getManifest,
+  loadManifest,
   loadAxiConfig,
   queryContext
 } from "@latticeag/axicontext-core";
@@ -19,6 +19,16 @@ export interface ServerOptions {
 }
 
 function buildOpenApi(host: string, port: number) {
+  const unauthorized = { description: "Missing or invalid API token" };
+  const manifestResponse = {
+    description: "Manifest",
+    headers: {
+      ETag: {
+        schema: { type: "string" }
+      }
+    }
+  };
+
   return {
     openapi: "3.1.0",
     info: {
@@ -26,14 +36,68 @@ function buildOpenApi(host: string, port: number) {
       version: "1.0.0"
     },
     servers: [{ url: `http://${host}:${port}` }],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer"
+        },
+        apiToken: {
+          type: "apiKey",
+          in: "header",
+          name: "X-API-Token"
+        }
+      }
+    },
     paths: {
-      "/healthz": { get: { summary: "Health check", responses: { 200: { description: "OK" } } } },
-      "/v1/manifest": { get: { summary: "Read context manifest" } },
-      "/v1/context": { get: { summary: "Read graph summary + manifest" } },
-      "/v1/context/slice": { get: { summary: "Read topic slice from context graph" } },
-      "/v1/context/query": { post: { summary: "Query graph excerpts" } },
-      "/v1/drift": { get: { summary: "Read drift report" } },
-      "/v1/openapi.json": { get: { summary: "Read OpenAPI spec" } }
+      "/healthz": {
+        get: {
+          summary: "Health check",
+          responses: { 200: { description: "OK" } }
+        }
+      },
+      "/v1/manifest": {
+        get: {
+          summary: "Read context manifest",
+          security: [{ bearerAuth: [] }, { apiToken: [] }],
+          responses: { 200: manifestResponse, 401: unauthorized, 404: { description: "Manifest missing" } }
+        }
+      },
+      "/v1/context": {
+        get: {
+          summary: "Read paginated graph nodes and manifest",
+          security: [{ bearerAuth: [] }, { apiToken: [] }],
+          parameters: [
+            { name: "cursor", in: "query", schema: { type: "string" } },
+            { name: "limit", in: "query", schema: { type: "integer", default: 100, minimum: 1, maximum: 200 } }
+          ],
+          responses: { 200: manifestResponse, 304: { description: "Not modified" }, 401: unauthorized, 404: { description: "Manifest missing" } }
+        }
+      },
+      "/v1/context/slice": {
+        get: {
+          summary: "Read topic slice from context graph",
+          security: [{ bearerAuth: [] }, { apiToken: [] }]
+        }
+      },
+      "/v1/context/query": {
+        post: {
+          summary: "Query graph excerpts",
+          security: [{ bearerAuth: [] }, { apiToken: [] }]
+        }
+      },
+      "/v1/drift": {
+        get: {
+          summary: "Read drift report",
+          security: [{ bearerAuth: [] }, { apiToken: [] }]
+        }
+      },
+      "/v1/openapi.json": {
+        get: {
+          summary: "Read OpenAPI spec",
+          security: [{ bearerAuth: [] }, { apiToken: [] }]
+        }
+      }
     }
   };
 }
@@ -44,6 +108,48 @@ function tokenFromRequest(request: Request): string | null {
     return bearer.slice("bearer ".length).trim();
   }
   return request.headers.get("x-api-token");
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+function etagValue(contentHash: string): string {
+  return `"${contentHash}"`;
+}
+
+function requestMatchesEtag(request: Request, etag: string): boolean {
+  const header = request.headers.get("if-none-match");
+  if (!header) {
+    return false;
+  }
+  return header
+    .split(",")
+    .map((entry) => entry.trim())
+    .some((entry) => entry === "*" || entry === etag || entry === etag.slice(1, -1));
+}
+
+function jsonBodyRecord(value: unknown): Record<string, unknown> {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function parseInclude(value: unknown): Array<"code" | "docs" | "issues" | "manifest"> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const allowed = new Set(["code", "docs", "issues", "manifest"]);
+  const include = value.filter((entry): entry is "code" | "docs" | "issues" | "manifest" => {
+    return typeof entry === "string" && allowed.has(entry);
+  });
+  return include.length > 0 ? include : undefined;
+}
+
+function parseOptionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 export function createAxiContextApp(options: {
@@ -77,11 +183,32 @@ export function createAxiContextApp(options: {
   });
 
   app.get("/v1/manifest", async (c) => {
-    const manifest = await getManifest(options.repoPath);
+    const manifest = await loadManifest(options.repoPath);
+    if (!manifest) {
+      return c.json({ error: "manifest_missing", hint: "run axictx sync" }, 404);
+    }
+    if (manifest.content_hash) {
+      const etag = etagValue(manifest.content_hash);
+      c.header("ETag", etag);
+      if (requestMatchesEtag(c.req.raw, etag)) {
+        return c.body(null, 304);
+      }
+    }
     return c.json(manifest);
   });
 
   app.get("/v1/context", async (c) => {
+    const manifest = await loadManifest(options.repoPath);
+    if (!manifest) {
+      return c.json({ error: "manifest_missing", hint: "run axictx sync" }, 404);
+    }
+    if (manifest.content_hash) {
+      const etag = etagValue(manifest.content_hash);
+      c.header("ETag", etag);
+      if (requestMatchesEtag(c.req.raw, etag)) {
+        return c.body(null, 304);
+      }
+    }
     const cursor = c.req.query("cursor");
     const limitRaw = c.req.query("limit");
     const limit = limitRaw ? Number(limitRaw) : undefined;
@@ -102,7 +229,7 @@ export function createAxiContextApp(options: {
   });
 
   app.post("/v1/context/query", async (c) => {
-    const body = await c.req.json();
+    const body = jsonBodyRecord(await c.req.json());
     const question = String(body.question ?? "");
     if (!question.trim()) {
       throw new HTTPException(400, { message: "question is required" });
@@ -110,11 +237,8 @@ export function createAxiContextApp(options: {
 
     const result = await queryContext(options.repoPath, {
       question,
-      max_tokens:
-        typeof body.max_tokens === "number" && Number.isFinite(body.max_tokens)
-          ? body.max_tokens
-          : undefined,
-      include: Array.isArray(body.include) ? body.include : undefined
+      max_tokens: parseOptionalFiniteNumber(body.max_tokens),
+      include: parseInclude(body.include)
     });
     return c.json(result);
   });
@@ -153,6 +277,9 @@ export async function resolveServerOptions(
 
 export async function startAxiContextServer(options: ServerOptions = {}) {
   const resolved = await resolveServerOptions(options);
+  if (!resolved.apiToken && !isLoopbackHost(resolved.host)) {
+    throw new Error("Refusing to start without an API token on a non-loopback host.");
+  }
   const app = createAxiContextApp({
     repoPath: resolved.repoPath,
     host: resolved.host,

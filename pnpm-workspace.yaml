@@ -1,6 +1,9 @@
 packages:
+  - "packages/parsers"
   - "packages/core"
   - "packages/cli"
   - "packages/sdk"
   - "packages/server"
   - "packages/adapters-git"
+  - "packages/fence-core"
+  - "packages/fence"

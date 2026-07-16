@@ -1,0 +1,37 @@
+{
+  "name": "@latticeag/axi-fence",
+  "version": "0.1.0",
+  "description": "AxiFence CLI for generating reviewable DevContainer setup.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LatticeAG/AxiContext.git",
+    "directory": "packages/fence"
+  },
+  "main": "dist/axi-fence-cli.js",
+  "types": "dist/axi-fence-cli.d.ts",
+  "bin": {
+    "axi-fence": "dist/axi-fence-cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/axi-fence-cli.js",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@latticeag/axi-fence-core": "workspace:*",
+    "@latticeag/axicontext-parsers": "workspace:*",
+    "commander": "^14.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+# Project Context
+## Overview
+## Monorepo / Packages
+## Architecture
+## Key Entry Points
+## Auth & Security
+## Data & Storage
+## APIs & Integrations
+## Tooling & Local Dev
+## Open Issues & Active Work
+## Decisions (ADRs)
+## Glossary
+## Provenance & Manifest

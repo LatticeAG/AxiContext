@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GraphStore } from "../src/graphStore.js";
-import { computeContentHash } from "../src/hash.js";
+import { computeContentHash, stableStringify } from "../src/hash.js";
 import { exportJsonSchemas } from "../src/graph-types.js";
 
 const tempRoots: string[] = [];
@@ -80,7 +80,7 @@ describe("GraphStore", () => {
       },
     });
 
-    expect(excerpt.id).toBe(computeContentHash(excerpt.text));
+    expect(excerpt.id).toBe(computeContentHash(`${excerpt.text}${stableStringify(excerpt.provenance)}`));
     const results = store.searchExcerpts("OAuth providers", 10);
     expect(results).toHaveLength(1);
     expect(results[0]?.id).toBe(excerpt.id);
@@ -172,8 +172,18 @@ describe("GraphStore", () => {
     const hashB = store.computeContentHash();
     expect(hashA).toBe(hashB);
 
-    const manifest = store.writeManifest();
-    expect(manifest.graph_path).toBe(".axicontext/graph/graph.sqlite");
+    const manifest = store.writeManifest({
+      git: {
+        digest: "sha256:adapter",
+        stats: { files_considered: 1 },
+      },
+    });
+    expect(manifest.axictx_version).toBe("0.1.0");
+    expect(manifest.embedding_model).toBe("none");
+    expect(manifest.adapters.git.digest).toBe("sha256:adapter");
+    expect(manifest.stats.node_count).toBe(1);
+    expect(manifest.stats.edge_count).toBe(1);
+    expect(manifest.stats.excerpt_count).toBe(1);
     expect(existsSync(join(repoRoot, ".axicontext", "manifest.json"))).toBe(true);
 
     const persisted = JSON.parse(
@@ -181,6 +191,31 @@ describe("GraphStore", () => {
     ) as { content_hash: string };
     expect(persisted.content_hash).toBe(manifest.content_hash);
 
+    store.close();
+  });
+
+  it("computes content hash from graph IDs only", () => {
+    const repoRoot = makeTempRoot();
+    const store = GraphStore.open(repoRoot);
+
+    store.upsertNode({
+      id: "project:root",
+      type: "project",
+      data: { name: "first" },
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    });
+    const hashA = store.computeContentHash();
+    store.upsertNode({
+      id: "project:root",
+      type: "project",
+      data: { name: "second" },
+      created_at: "2026-02-01T00:00:00.000Z",
+      updated_at: "2026-02-01T00:00:00.000Z",
+    });
+    const hashB = store.computeContentHash();
+
+    expect(hashA).toBe(hashB);
     store.close();
   });
 });

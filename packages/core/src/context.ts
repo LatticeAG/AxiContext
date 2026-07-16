@@ -1,5 +1,7 @@
 import path from "node:path";
 import { fileExists, listRepoFiles, safeReadText, sha256, estimateTokens } from "./fs-utils.js";
+import { GraphStore } from "./graphStore.js";
+import type { Node } from "./graph-types.js";
 import type {
   ContextExcerpt,
   ContextNode,
@@ -37,7 +39,7 @@ function buildManifestFromFacts(facts: RepoFacts): Manifest {
   };
 }
 
-async function loadManifest(repoPath: string): Promise<Manifest | null> {
+export async function loadManifest(repoPath: string): Promise<Manifest | null> {
   const manifestPath = path.join(repoPath, ".axicontext", "manifest.json");
   if (!(await fileExists(manifestPath))) {
     return null;
@@ -51,6 +53,36 @@ async function loadManifest(repoPath: string): Promise<Manifest | null> {
   } catch {
     return null;
   }
+}
+
+function graphPath(repoPath: string): string {
+  return path.join(repoPath, ".axicontext", "graph", "graph.sqlite");
+}
+
+function readString(data: Record<string, unknown>, key: string): string | undefined {
+  const value = data[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function graphNodeType(node: Node): ContextNode["type"] {
+  if (node.type === "project" || node.type === "module" || node.type === "file" || node.type === "dependency") {
+    return node.type;
+  }
+  return node.type === "tree_digest" ? "module" : "file";
+}
+
+function graphNodeLabel(node: Node): string {
+  return readString(node.data, "name") ?? readString(node.data, "path") ?? readString(node.data, "label") ?? node.id;
+}
+
+function graphNodeToContextNode(node: Node): ContextNode {
+  const pathValue = readString(node.data, "path");
+  return {
+    id: node.id,
+    type: graphNodeType(node),
+    label: graphNodeLabel(node),
+    ...(pathValue ? { path: pathValue } : {})
+  };
 }
 
 async function collectRepoFacts(repoPath: string): Promise<RepoFacts> {
@@ -179,24 +211,30 @@ export async function getContextPage(
   repoPath: string,
   options?: { cursor?: string; limit?: number }
 ): Promise<ContextPage> {
-  const summary = await getContextSummary(repoPath);
-  const limit = Math.max(1, Math.min(options?.limit ?? 25, 200));
+  const limit = Math.max(1, Math.min(options?.limit ?? 100, 200));
   const offset = parseCursor(options?.cursor);
+  const manifest = (await loadManifest(repoPath)) ?? (await getContextSummary(repoPath)).manifest;
 
-  const pagedExcerpts = summary.excerpts.slice(offset, offset + limit);
-  const nextCursor =
-    offset + limit < summary.excerpts.length ? String(offset + limit) : null;
-
-  return {
-    summary: {
-      ...summary,
-      excerpts: pagedExcerpts
-    },
-    page: {
-      cursor: options?.cursor ?? null,
-      next_cursor: nextCursor,
-      limit
+  if (await fileExists(graphPath(repoPath))) {
+    const store = GraphStore.open(repoPath);
+    try {
+      const nodes = store.listNodes().map(graphNodeToContextNode);
+      return {
+        manifest,
+        nodes: nodes.slice(offset, offset + limit),
+        next_cursor: offset + limit < nodes.length ? String(offset + limit) : null
+      };
+    } finally {
+      store.close();
     }
+  }
+
+  const summary = await getContextSummary(repoPath);
+  const nodes = summary.nodes;
+  return {
+    manifest,
+    nodes: nodes.slice(offset, offset + limit),
+    next_cursor: offset + limit < nodes.length ? String(offset + limit) : null
   };
 }
 

@@ -18,5 +18,23 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Fixture E2E scaffold
+        run: |
+          set -euo pipefail
+          test -d testdata/fixtures/minimal-node-repo
+          # E2E will use built axictx against testdata/fixtures/minimal-node-repo
+          BIN="packages/cli/dist/axictx-cli.js"
+          if [ ! -f "$BIN" ]; then
+            echo "Built axictx bin not found at $BIN; skipping fixture E2E."
+            exit 0
+          fi
+          FIXTURE_COPY="$(mktemp -d)"
+          cp -R testdata/fixtures/minimal-node-repo/. "$FIXTURE_COPY"/
+          (
+            cd "$FIXTURE_COPY"
+            node "$GITHUB_WORKSPACE/$BIN" init
+            node "$GITHUB_WORKSPACE/$BIN" sync
+            node "$GITHUB_WORKSPACE/$BIN" drift
+          )
       - run: pnpm test
       - run: pnpm typecheck

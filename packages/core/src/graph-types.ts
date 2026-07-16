@@ -5,6 +5,8 @@ export const NodeTypeSchema = z.enum([
   "module",
   "file",
   "dependency",
+  "commit",
+  "tree_digest",
   "issue",
   "doc",
   "decision",
@@ -18,6 +20,7 @@ export const EdgeTypeSchema = z.enum([
   "tracked_by",
   "decided_in",
   "references",
+  "authored_by",
 ]);
 
 export const ProvenanceSchema = z.object({
@@ -85,15 +88,27 @@ export const SliceSchema = z.object({
 });
 
 export const GraphManifestSchema = z.object({
-  schema_version: z.string().min(1),
+  schema_version: z.literal("1.0.0"),
+  axictx_version: z.string().min(1),
   generated_at: z.string().min(1),
   project_root: z.string().min(1),
-  graph_path: z.string().min(1),
   content_hash: z.string().min(1),
+  project_context_hash: z.string().min(1),
+  embedding_model: z.literal("none"),
+  policy_pack: z.string().min(1),
+  adapters: z.record(
+    z.string(),
+    z.object({
+      digest: z.string().min(1),
+      ingested_at: z.string().min(1),
+      stats: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])).default({}),
+      warnings: z.array(z.string()).default([]),
+    }),
+  ),
   stats: z.object({
-    nodes: z.number().int().nonnegative(),
-    edges: z.number().int().nonnegative(),
-    excerpts: z.number().int().nonnegative(),
+    node_count: z.number().int().nonnegative(),
+    edge_count: z.number().int().nonnegative(),
+    excerpt_count: z.number().int().nonnegative(),
   }),
 });
 
@@ -163,23 +178,30 @@ export function exportJsonSchemas() {
         "schema_version",
         "generated_at",
         "project_root",
-        "graph_path",
         "content_hash",
+        "project_context_hash",
+        "embedding_model",
+        "policy_pack",
+        "adapters",
         "stats",
       ],
       properties: {
-        schema_version: { type: "string" },
+        schema_version: { type: "string", const: "1.0.0" },
+        axictx_version: { type: "string" },
         generated_at: { type: "string" },
         project_root: { type: "string" },
-        graph_path: { type: "string" },
         content_hash: { type: "string" },
+        project_context_hash: { type: "string" },
+        embedding_model: { type: "string", const: "none" },
+        policy_pack: { type: "string" },
+        adapters: { type: "object" },
         stats: {
           type: "object",
-          required: ["nodes", "edges", "excerpts"],
+          required: ["node_count", "edge_count", "excerpt_count"],
           properties: {
-            nodes: { type: "integer", minimum: 0 },
-            edges: { type: "integer", minimum: 0 },
-            excerpts: { type: "integer", minimum: 0 },
+            node_count: { type: "integer", minimum: 0 },
+            edge_count: { type: "integer", minimum: 0 },
+            excerpt_count: { type: "integer", minimum: 0 },
           },
         },
       },

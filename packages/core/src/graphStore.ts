@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { computeContentHash } from "./hash.js";
+import { computeContentHash, stableStringify } from "./hash.js";
 import { GRAPH_SCHEMA_DDL } from "./schema.js";
 import {
   AddExcerptInput,
@@ -20,6 +20,13 @@ import {
   UpsertNodeInput,
   UpsertNodeInputSchema,
 } from "./graph-types.js";
+
+export interface AdapterManifestEntry {
+  digest: string;
+  ingested_at?: string;
+  stats?: Record<string, number | string | boolean>;
+  warnings?: string[];
+}
 
 type NodeRow = {
   id: string;
@@ -63,6 +70,11 @@ function normalizeFtsQuery(query: string): string {
     .join(" ");
 }
 
+function ftsTextForExcerpt(excerpt: AddExcerptInput): string {
+  const pathValue = excerpt.provenance.path;
+  return pathValue ? `${pathValue}\n${excerpt.text}` : excerpt.text;
+}
+
 function estimateTokens(value: unknown): number {
   return Math.max(1, Math.ceil(JSON.stringify(value).length / 4));
 }
@@ -94,6 +106,15 @@ export class GraphStore {
 
   close(): void {
     this.db.close();
+  }
+
+  clear(): void {
+    this.db.exec(`
+      DELETE FROM fts;
+      DELETE FROM excerpts;
+      DELETE FROM edges;
+      DELETE FROM nodes;
+    `);
   }
 
   upsertNode(input: UpsertNodeInput): Node {
@@ -163,7 +184,7 @@ export class GraphStore {
 
   addExcerpt(input: AddExcerptInput): Excerpt {
     const parsed = AddExcerptInputSchema.parse(input);
-    const id = parsed.id ?? computeContentHash(parsed.text);
+    const id = parsed.id ?? computeContentHash(`${parsed.text}${stableStringify(parsed.provenance)}`);
 
     this.db
       .prepare(
@@ -182,7 +203,7 @@ export class GraphStore {
       });
 
     this.db.prepare("DELETE FROM fts WHERE id = ?").run(id);
-    this.db.prepare("INSERT INTO fts (id, text) VALUES (?, ?)").run(id, parsed.text);
+    this.db.prepare("INSERT INTO fts (id, text) VALUES (?, ?)").run(id, ftsTextForExcerpt(parsed));
 
     const row = this.db.prepare("SELECT * FROM excerpts WHERE id = ?").get(id) as
       | ExcerptRow
@@ -196,6 +217,20 @@ export class GraphStore {
   getNode(id: string): Node | null {
     const row = this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow | undefined;
     return row ? parseNodeRow(row) : null;
+  }
+
+  listNodes(): Node[] {
+    return (this.db.prepare("SELECT * FROM nodes ORDER BY id").all() as NodeRow[]).map(parseNodeRow);
+  }
+
+  listEdges(): Edge[] {
+    return (this.db.prepare("SELECT * FROM edges ORDER BY id").all() as EdgeRow[]).map(parseEdgeRow);
+  }
+
+  listExcerpts(): Excerpt[] {
+    return (this.db.prepare("SELECT * FROM excerpts ORDER BY id").all() as ExcerptRow[]).map(
+      parseExcerptRow,
+    );
   }
 
   searchExcerpts(query: string, limit = 10): Excerpt[] {
@@ -325,16 +360,23 @@ export class GraphStore {
 
   computeContentHash(): string {
     const snapshot = {
-      nodes: (this.db.prepare("SELECT * FROM nodes ORDER BY id").all() as NodeRow[]).map(parseNodeRow),
-      edges: (this.db.prepare("SELECT * FROM edges ORDER BY id").all() as EdgeRow[]).map(parseEdgeRow),
-      excerpts: (this.db.prepare("SELECT * FROM excerpts ORDER BY id").all() as ExcerptRow[]).map(
-        parseExcerptRow,
+      nodes: (this.db.prepare("SELECT id FROM nodes ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id,
       ),
+      edges: (this.db.prepare("SELECT id FROM edges ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id,
+      ),
+      excerpts: (
+        this.db.prepare("SELECT id FROM excerpts ORDER BY id").all() as Array<{ id: string }>
+      ).map((row) => row.id),
     };
     return computeContentHash(snapshot);
   }
 
-  exportManifest(): GraphManifest {
+  exportManifest(
+    adapterDigests: Record<string, AdapterManifestEntry> = {},
+    projectContextHash = computeContentHash(""),
+  ): GraphManifest {
     const nodeCount = this.db.prepare("SELECT COUNT(1) AS count FROM nodes").get() as {
       count: number;
     };
@@ -344,23 +386,44 @@ export class GraphStore {
     const excerptCount = this.db.prepare("SELECT COUNT(1) AS count FROM excerpts").get() as {
       count: number;
     };
+    const generatedAt = new Date().toISOString();
+    const adapters = Object.fromEntries(
+      Object.entries(adapterDigests)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([id, entry]) => [
+          id,
+          {
+            digest: entry.digest,
+            ingested_at: entry.ingested_at ?? generatedAt,
+            stats: entry.stats ?? {},
+            warnings: entry.warnings ?? [],
+          },
+        ]),
+    );
 
     return GraphManifestSchema.parse({
       schema_version: "1.0.0",
-      generated_at: new Date().toISOString(),
+      axictx_version: "0.1.0",
+      generated_at: generatedAt,
       project_root: this.repoRoot,
-      graph_path: relative(this.repoRoot, this.graphPath) || ".axicontext/graph/graph.sqlite",
       content_hash: this.computeContentHash(),
+      project_context_hash: projectContextHash,
+      embedding_model: "none",
+      policy_pack: "default@1",
+      adapters,
       stats: {
-        nodes: nodeCount.count,
-        edges: edgeCount.count,
-        excerpts: excerptCount.count,
+        node_count: nodeCount.count,
+        edge_count: edgeCount.count,
+        excerpt_count: excerptCount.count,
       },
     });
   }
 
-  writeManifest(): GraphManifest {
-    const manifest = this.exportManifest();
+  writeManifest(
+    adapterDigests: Record<string, AdapterManifestEntry> = {},
+    projectContextHash = computeContentHash(""),
+  ): GraphManifest {
+    const manifest = this.exportManifest(adapterDigests, projectContextHash);
     mkdirSync(join(this.repoRoot, ".axicontext"), { recursive: true });
     writeFileSync(this.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     return manifest;
