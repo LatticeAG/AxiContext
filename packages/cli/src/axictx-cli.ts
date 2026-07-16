@@ -17,6 +17,7 @@ import {
   loadAxiConfig,
   loadAxiContextConfig,
   queryContext,
+  resolveAxiRepoRoot,
   runSync,
   scaffoldAxiContext,
   shouldFailOnDrift,
@@ -76,6 +77,21 @@ async function pathReadable(filePath: string): Promise<boolean> {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+interface RepoRootOption {
+  repoRoot?: string;
+}
+
+function resolveCliRepoRoot(options: RepoRootOption = {}): string {
+  return resolveAxiRepoRoot(options.repoRoot);
+}
+
+function firstExcerptLine(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) ?? "";
 }
 
 const ADAPTER_FACTORIES = {
@@ -213,12 +229,14 @@ function writeSyncSummary(summary: {
   manifestPath: string;
   projectContextPath: string;
   adapters: string[];
+  duration_ms: number;
   warnings: string[];
 }) {
   process.stdout.write(summary.dryRun ? "Sync dry run completed.\n" : "Sync completed.\n");
   process.stdout.write(`Manifest: ${summary.manifestPath}\n`);
   process.stdout.write(`Project context: ${summary.projectContextPath}\n`);
   process.stdout.write(`Adapters: ${summary.adapters.length > 0 ? summary.adapters.join(", ") : "none"}\n`);
+  process.stdout.write(`Duration: ${summary.duration_ms} ms\n`);
   if (summary.warnings.length > 0) {
     process.stdout.write("\nWarnings:\n");
     for (const warning of summary.warnings) {
@@ -233,12 +251,14 @@ program.name("axictx").description("AxiContext OSS CLI");
 program
   .command("init")
   .description("Scaffold the .axicontext setup in this repository")
+  .option("--repo-root <path>", "repository root to use")
   .option("--overwrite-config", "Overwrite .axicontext/config.toml if it already exists", false)
   .option("--yes", "Run without prompts", false)
   .option("--json", "emit JSON result", false)
-  .action(async (options: { overwriteConfig: boolean; yes: boolean; json: boolean }) => {
+  .action(async (options: RepoRootOption & { overwriteConfig: boolean; yes: boolean; json: boolean }) => {
+    const repoRoot = resolveCliRepoRoot(options);
     const result = await scaffoldAxiContext({
-      repoRoot: process.cwd(),
+      repoRoot,
       overwriteConfig: options.overwriteConfig,
     });
 
@@ -272,8 +292,9 @@ program
 program
   .command("doctor")
   .description("Validate local AxiContext setup")
-  .action(async () => {
-    const repoRoot = process.cwd();
+  .option("--repo-root <path>", "repository root to inspect")
+  .action(async (options: RepoRootOption) => {
+    const repoRoot = resolveCliRepoRoot(options);
     const checks: Array<{ status: "ok" | "warn" | "error"; name: string; detail: string; configError?: boolean }> = [];
     const axiContextDir = path.join(repoRoot, AXICONTEXT_DIR);
     const configPath = path.join(axiContextDir, CONFIG_FILE_NAME);
@@ -344,7 +365,7 @@ program
 program
   .command("sync")
   .description("Run source adapters and regenerate PROJECT_CONTEXT.md")
-  .option("--repo-root <path>", "repository root to scan", process.cwd())
+  .option("--repo-root <path>", "repository root to scan")
   .option("--max-chars <value>", "maximum PROJECT_CONTEXT output size")
   .option("--max-files <value>", "maximum excerpted files")
   .option("--max-lines-per-file <value>", "maximum lines per excerpted file")
@@ -354,7 +375,7 @@ program
   .option("--json", "emit JSON result", false)
   .action(
     async (options: {
-      repoRoot: string;
+      repoRoot?: string;
       maxChars?: string;
       maxFiles?: string;
       maxLinesPerFile?: string;
@@ -363,9 +384,11 @@ program
       adapters?: string;
       json: boolean;
     }) => {
+      const repoRoot = resolveCliRepoRoot(options);
       const adapterIds = parseAdapterCsv(options.adapters);
       const adapters = createAdapters(adapterIds);
-      const result = await runSync(options.repoRoot, {
+      const startedAt = Date.now();
+      const result = await runSync(repoRoot, {
         adapters,
         adapterIds,
         dryRun: options.dryRun,
@@ -375,6 +398,7 @@ program
           ? parsePositiveInt(options.maxLinesPerFile, "--max-lines-per-file")
           : undefined,
       });
+      const durationMs = Date.now() - startedAt;
 
       const warnings = [...result.warnings];
       const adapterOutputIds = Object.keys(result.manifest.adapters);
@@ -383,6 +407,7 @@ program
         manifestPath: result.manifestPath,
         projectContextPath: result.projectContextPath,
         adapters: adapterOutputIds,
+        duration_ms: durationMs,
         warnings,
       };
 
@@ -393,8 +418,8 @@ program
       }
 
       if (options.failOnDrift) {
-        const report = await detectDrift(options.repoRoot);
-        const config = await loadAxiContextConfig(options.repoRoot);
+        const report = await detectDrift(repoRoot);
+        const config = await loadAxiContextConfig(repoRoot);
         if (shouldExitForDrift(report, config)) {
           exitCode = ExitCode.Drift;
         }
@@ -413,10 +438,12 @@ program
 program
   .command("serve")
   .description("Start Agent Read API server")
+  .option("--repo-root <path>", "repository root to serve")
   .option("--port <port>", "server port", (value) => parsePositiveInt(value, "--port"))
   .option("--host <host>", "bind host")
-  .action(async (options: { port?: number; host?: string }) => {
-    const config = await loadAxiConfig(process.cwd());
+  .action(async (options: RepoRootOption & { port?: number; host?: string }) => {
+    const repoRoot = resolveCliRepoRoot(options);
+    const config = await loadAxiConfig(repoRoot);
     const server = await startAxiContextServer({
       repoPath: config.repo_root,
       host: options.host ?? config.serve.host,
@@ -431,14 +458,16 @@ program
 program
   .command("drift")
   .description("Run context drift checks")
+  .option("--repo-root <path>", "repository root to check")
   .option("--format <format>", "json|md|sarif output format", "md")
   .option("--json", "alias for --format json", false)
   .option("--ci", "print GitHub Actions annotations", false)
   .option("--fail-on-drift", "exit with code 2 when drift is detected", false)
-  .action(async (options: { format: string; json: boolean; ci: boolean; failOnDrift: boolean }) => {
+  .action(async (options: RepoRootOption & { format: string; json: boolean; ci: boolean; failOnDrift: boolean }) => {
+    const repoRoot = resolveCliRepoRoot(options);
     const format = options.json ? "json" : options.format;
     assertDriftFormat(format);
-    const report = await detectDrift(process.cwd());
+    const report = await detectDrift(repoRoot);
     if (format === "json") {
       print(report);
     } else if (format === "sarif") {
@@ -454,7 +483,7 @@ program
     }
 
     if (options.failOnDrift) {
-      const config = await loadAxiContextConfig(process.cwd());
+      const config = await loadAxiContextConfig(repoRoot);
       if (shouldExitForDrift(report, config)) {
         process.exitCode = ExitCode.Drift;
       }
@@ -465,11 +494,13 @@ program
   .command("query")
   .description("Query graph excerpts using keyword search")
   .argument("<question>", "question to ask the context graph")
+  .option("--repo-root <path>", "repository root to query")
   .option("--max-tokens <maxTokens>", "token budget", (value) => parsePositiveInt(value, "--max-tokens"))
   .option("--json", "emit JSON result", false)
-  .action(async (question: string, options: { maxTokens?: number; json: boolean }) => {
-    const config = await loadAxiConfig(process.cwd());
-    const result = await queryContext(process.cwd(), {
+  .action(async (question: string, options: RepoRootOption & { maxTokens?: number; json: boolean }) => {
+    const repoRoot = resolveCliRepoRoot(options);
+    const config = await loadAxiConfig(repoRoot);
+    const result = await queryContext(repoRoot, {
       question,
       max_tokens: options.maxTokens ?? config.query.max_tokens_default,
     });
@@ -482,25 +513,36 @@ program
     process.stdout.write(`Question: ${result.question}\n`);
     process.stdout.write(`Matches: ${result.answer_context.length}\n\n`);
     for (const excerpt of result.answer_context) {
-      process.stdout.write(`- ${excerpt.path} (${excerpt.tokens} tokens)\n`);
+      const line = firstExcerptLine(excerpt.text);
+      process.stdout.write(`- ${excerpt.path}: ${line} (${excerpt.tokens} tokens)\n`);
+    }
+    process.stdout.write(`\ntokens_used: ${result.tokens_used}\n`);
+    if (result.hint) {
+      process.stdout.write(`Hint: ${result.hint}\n`);
+    }
+    if (result.warning) {
+      process.stdout.write(`Warning: ${result.warning}\n`);
     }
   });
 
 program
   .command("status")
   .description("Show manifest and graph summary")
+  .option("--repo-root <path>", "repository root to inspect")
   .option("--json", "emit JSON result", false)
-  .action(async (options: { json: boolean }) => {
-    const manifest = await getManifest(process.cwd());
-    const context = await getContextSummary(process.cwd());
+  .action(async (options: RepoRootOption & { json: boolean }) => {
+    const repoRoot = resolveCliRepoRoot(options);
+    const manifest = await getManifest(repoRoot);
+    const context = await getContextSummary(repoRoot);
     const status = {
       manifest: {
         schema_version: manifest.schema_version,
         generated_at: manifest.generated_at ?? null,
         adapters: Object.keys(manifest.adapters),
+        stats: manifest.stats ?? null,
       },
       context: {
-        repo_path: path.relative(process.cwd(), context.repo_path) || ".",
+        repo_path: path.relative(repoRoot, context.repo_path) || ".",
         file_count: context.file_count,
         auth_path_count: context.auth_path_count,
         direct_dependency_count: context.direct_dependency_count,
@@ -514,9 +556,13 @@ program
     }
 
     process.stdout.write(`Manifest schema: ${status.manifest.schema_version}\n`);
-    process.stdout.write(`Generated at: ${status.manifest.generated_at ?? "unknown"}\n`);
+    process.stdout.write(`Last sync: ${status.manifest.generated_at ?? "unknown"}\n`);
     process.stdout.write(
       `Adapters: ${status.manifest.adapters.length > 0 ? status.manifest.adapters.join(", ") : "none"}\n`,
+    );
+    const stats = status.manifest.stats;
+    process.stdout.write(
+      `Counts: ${stats?.node_count ?? context.nodes.length} nodes, ${stats?.edge_count ?? 0} edges, ${stats?.excerpt_count ?? status.context.excerpt_count} excerpts\n`,
     );
     process.stdout.write(`Files: ${status.context.file_count}\n`);
     process.stdout.write(`Auth paths: ${status.context.auth_path_count}\n`);

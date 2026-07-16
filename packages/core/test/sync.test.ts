@@ -85,6 +85,30 @@ describe("git adapter and sync pipeline", () => {
   it("runSync writes manifest and PROJECT_CONTEXT.md", async () => {
     const repoRoot = await createTempFixtureRepo();
     try {
+      const packageJsonPath = path.join(repoRoot, "package.json");
+      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+        dependencies?: Record<string, string>;
+      };
+      await writeFile(
+        packageJsonPath,
+        `${JSON.stringify(
+          {
+            ...packageJson,
+            dependencies: {
+              ...packageJson.dependencies,
+              prisma: "^6.0.0",
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      await mkdir(path.join(repoRoot, "docs", "adr"), { recursive: true });
+      await writeFile(path.join(repoRoot, "docs", "adr", "0001-database.md"), "# Use Prisma\n", "utf8");
+      await mkdir(path.join(repoRoot, "prisma"), { recursive: true });
+      await writeFile(path.join(repoRoot, "prisma", "schema.prisma"), "datasource db { provider = \"postgresql\" }\n", "utf8");
+
       const result = await runSync(repoRoot, {
         adapters: [new GitSourceAdapter()],
         maxChars: 10_000,
@@ -113,6 +137,10 @@ describe("git adapter and sync pipeline", () => {
       expect(projectContext).toContain("## Decisions (ADRs)");
       expect(projectContext).toContain("## Glossary");
       expect(projectContext).toContain("## Provenance & Manifest");
+      expect(projectContext).toContain("Storage dependency: `prisma`");
+      expect(projectContext).toContain("Prisma schema/config path: `prisma/schema.prisma`");
+      expect(projectContext).toContain("ADR path: `docs/adr/0001-database.md`");
+      expect(projectContext).toContain("README heading: Usage");
       expect(projectContext.length).toBeLessThanOrEqual(10_000);
 
       const store = GraphStore.open(repoRoot);
@@ -138,6 +166,43 @@ describe("git adapter and sync pipeline", () => {
       });
       expect(queryResult.tokens_used).toBeGreaterThan(0);
       expect(queryResult.answer_context.map((excerpt) => excerpt.path)).toContain("src/auth/session.ts");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("redacts secret-looking values from sync excerpts and PROJECT_CONTEXT.md", async () => {
+    const repoRoot = await createTempFixtureRepo();
+    const awsSecret = "AKIA1234567890ABCDEF";
+    const githubSecret = "ghp_1234567890abcdefghij1234567890ABCD";
+    try {
+      await writeFile(
+        path.join(repoRoot, "docs", "keys.md"),
+        `# Keys\n\nAWS ${awsSecret}\nGitHub ${githubSecret}\n`,
+        "utf8",
+      );
+
+      const result = await runSync(repoRoot, {
+        adapters: [new GitSourceAdapter()],
+        maxChars: 10_000,
+      });
+
+      const store = GraphStore.open(repoRoot);
+      try {
+        const excerptText = store
+          .listExcerpts()
+          .map((excerpt) => excerpt.text)
+          .join("\n");
+        expect(excerptText).toContain("[REDACTED:aws_access_key]");
+        expect(excerptText).toContain("[REDACTED:github_token]");
+        expect(excerptText).not.toContain(awsSecret);
+        expect(excerptText).not.toContain(githubSecret);
+      } finally {
+        store.close();
+      }
+
+      expect(result.projectContext).not.toContain(awsSecret);
+      expect(result.projectContext).not.toContain(githubSecret);
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }

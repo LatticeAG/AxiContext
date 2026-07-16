@@ -68,10 +68,14 @@ function includeExcerpt(excerpt: ContextExcerpt, include: QueryRequest["include"
 }
 
 function scoreExcerpt(excerpt: ContextExcerpt, keywords: string[]): number {
-  const haystack = `${excerpt.path}\n${excerpt.text}`.toLowerCase();
+  const excerptPath = excerpt.path.toLowerCase();
+  const body = excerpt.text.toLowerCase();
   let score = 0;
   for (const keyword of keywords) {
-    if (haystack.includes(keyword)) {
+    if (excerptPath.includes(keyword)) {
+      score += 5;
+    }
+    if (body.includes(keyword)) {
       score += 1;
     }
   }
@@ -140,7 +144,8 @@ export async function queryContext(
         question: request.question,
         answer_context: packed.selected,
         tokens_used: packed.tokensUsed,
-        manifest_version: manifest.schema_version
+        manifest_version: manifest.schema_version,
+        ...(packed.selected.length === 0 ? { hint: "try fewer keywords" } : {})
       };
     } finally {
       store.close();
@@ -178,6 +183,7 @@ export async function queryContext(
     answer_context: packed.selected,
     tokens_used: packed.tokensUsed,
     manifest_version: summary.manifest.schema_version,
-    warning: "No .axicontext/graph/graph.sqlite found; run axictx sync for graph-backed query results."
+    warning: "No .axicontext/graph/graph.sqlite found; run axictx sync for graph-backed query results.",
+    ...(packed.selected.length === 0 ? { hint: "run axictx sync" } : {})
   };
 }

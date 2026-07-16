@@ -89,6 +89,7 @@ export interface QueryResult {
   tokens_used: number;
   manifest_version: string;
   warning?: string;
+  hint?: string;
 }
 
 export interface DriftChange {

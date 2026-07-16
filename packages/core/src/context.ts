@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileExists, listRepoFiles, safeReadText, sha256, estimateTokens } from "./fs-utils.js";
 import { GraphStore } from "./graphStore.js";
-import type { Node } from "./graph-types.js";
+import type { Excerpt, GraphSlice, Node } from "./graph-types.js";
 import type {
   ContextExcerpt,
   ContextNode,
@@ -241,16 +241,22 @@ export async function getContextPage(
 export async function getContextSlice(
   repoPath: string,
   request: SliceRequest
-): Promise<{
-  topic: string;
-  depth: number;
-  max_tokens: number;
-  excerpts: ContextExcerpt[];
-  nodes: ContextNode[];
-  manifest: Manifest;
-}> {
+): Promise<GraphSlice & { manifest: Manifest }> {
   const depth = request.depth ?? 2;
   const maxTokens = Math.max(200, request.max_tokens ?? 2000);
+  if (await fileExists(graphPath(repoPath))) {
+    const manifest = (await loadManifest(repoPath)) ?? (await getContextSummary(repoPath)).manifest;
+    const store = GraphStore.open(repoPath);
+    try {
+      return {
+        ...store.getSlice(request.topic, depth, maxTokens),
+        manifest
+      };
+    } finally {
+      store.close();
+    }
+  }
+
   const summary = await getContextSummary(repoPath);
   const topic = request.topic.toLowerCase();
   const matching = summary.excerpts
@@ -273,17 +279,48 @@ export async function getContextSlice(
   }
 
   const nodeSet = new Set(selected.map((excerpt) => excerpt.path));
-  const nodes = summary.nodes.filter(
-    (node) => !node.path || nodeSet.has(node.path) || node.type !== "file"
-  );
+  const nodes = summary.nodes
+    .filter((node) => !node.path || nodeSet.has(node.path) || node.type !== "file")
+    .map(contextNodeToGraphNode);
+  const excerpts = selected.map(contextExcerptToGraphExcerpt);
 
   return {
     topic: request.topic,
     depth,
     max_tokens: maxTokens,
-    excerpts: selected,
+    estimated_tokens: estimateTokens(JSON.stringify({ nodes, excerpts })),
+    excerpts,
     nodes,
+    edges: [],
     manifest: summary.manifest
+  };
+}
+
+function contextNodeToGraphNode(node: ContextNode): Node {
+  const now = new Date().toISOString();
+  return {
+    id: node.id,
+    type: node.type,
+    data: {
+      label: node.label,
+      ...(node.path ? { path: node.path } : {})
+    },
+    created_at: now,
+    updated_at: now
+  };
+}
+
+function contextExcerptToGraphExcerpt(excerpt: ContextExcerpt): Excerpt {
+  return {
+    id: excerpt.id,
+    text: excerpt.text,
+    provenance: excerpt.provenance ?? {
+      adapter: "summary",
+      path: excerpt.path,
+      start_line: excerpt.start_line,
+      end_line: excerpt.end_line,
+      ingested_at: new Date().toISOString()
+    }
   };
 }
 

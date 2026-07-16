@@ -88,6 +88,9 @@ describe("Agent Read API routes", () => {
 
     const health = await app.request("/healthz");
     expect(health.status).toBe(200);
+    const healthJson = await health.json();
+    expect(healthJson.axictx_version).toBe("0.1.0");
+    expect(healthJson.content_hash).toMatch(/^sha256:/);
 
     const manifest = await app.request("/v1/manifest");
     expect(manifest.status).toBe(200);
@@ -162,6 +165,10 @@ describe("Agent Read API routes", () => {
 
     const unauthorized = await app.request("/v1/manifest");
     expect(unauthorized.status).toBe(401);
+    await expect(unauthorized.json()).resolves.toEqual({
+      error: "invalid api token",
+      code: "http_401"
+    });
 
     const authorized = await app.request("/v1/manifest", {
       headers: {
@@ -185,7 +192,8 @@ describe("Agent Read API routes", () => {
     expect(manifest.status).toBe(404);
     await expect(manifest.json()).resolves.toEqual({
       error: "manifest_missing",
-      hint: "run axictx sync"
+      hint: "run axictx sync",
+      code: "manifest_missing"
     });
   });
 
