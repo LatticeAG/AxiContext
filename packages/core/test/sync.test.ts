@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { GitSourceAdapter } from "../../adapters-git/src/index.js";
 import { DEFAULT_CONFIG_TOML } from "../src/constants.js";
 import { GraphStore } from "../src/graphStore.js";
+import { queryContext } from "../src/query.js";
 import { runSync } from "../src/sync.js";
 
 const execFile = promisify(execFileCallback);
@@ -123,9 +124,20 @@ describe("git adapter and sync pipeline", () => {
           start_line: 1,
         });
         expect(readmeExcerpt?.provenance.ingested_at).toEqual(expect.any(String));
+
+        const sessionExcerpt = store.listExcerpts().find((excerpt) => excerpt.provenance.path === "src/auth/session.ts");
+        expect(sessionExcerpt?.text).toContain("createSession");
+        expect(store.searchExcerpts("auth", 10).map((excerpt) => excerpt.provenance.path)).toContain("src/auth/session.ts");
       } finally {
         store.close();
       }
+
+      const queryResult = await queryContext(repoRoot, {
+        question: "auth",
+        max_tokens: 1000,
+      });
+      expect(queryResult.tokens_used).toBeGreaterThan(0);
+      expect(queryResult.answer_context.map((excerpt) => excerpt.path)).toContain("src/auth/session.ts");
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }

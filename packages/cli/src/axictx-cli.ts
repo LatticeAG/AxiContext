@@ -432,14 +432,16 @@ program
   .command("drift")
   .description("Run context drift checks")
   .option("--format <format>", "json|md|sarif output format", "md")
+  .option("--json", "alias for --format json", false)
   .option("--ci", "print GitHub Actions annotations", false)
   .option("--fail-on-drift", "exit with code 2 when drift is detected", false)
-  .action(async (options: { format: string; ci: boolean; failOnDrift: boolean }) => {
-    assertDriftFormat(options.format);
+  .action(async (options: { format: string; json: boolean; ci: boolean; failOnDrift: boolean }) => {
+    const format = options.json ? "json" : options.format;
+    assertDriftFormat(format);
     const report = await detectDrift(process.cwd());
-    if (options.format === "json") {
+    if (format === "json") {
       print(report);
-    } else if (options.format === "sarif") {
+    } else if (format === "sarif") {
       print(formatDriftSarif(report));
     } else {
       process.stdout.write(`${formatDriftMarkdown(report)}\n`);

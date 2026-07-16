@@ -1,7 +1,7 @@
-import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { execFile as execFileCallback } from "node:child_process";
+import { analyzeRepo } from "@latticeag/axicontext-parsers";
 import { getAxiContextConfigPath, loadAxiContextConfig } from "./config.js";
 import { DEFAULT_PROJECT_CONTEXT_PATH } from "./constants.js";
 import { loadManifest } from "./context.js";
@@ -35,19 +35,6 @@ const ADAPTER_IGNORED_SEGMENTS = new Set([
 ]);
 
 const MANIFEST_NAMES = new Set(["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml"]);
-const LOCKFILE_NAMES = new Set([
-  "package-lock.json",
-  "pnpm-lock.yaml",
-  "yarn.lock",
-  "bun.lockb",
-  "bun.lock",
-  "poetry.lock",
-  "Cargo.lock",
-  "go.sum",
-  "Pipfile.lock",
-  "composer.lock"
-]);
-
 interface DriftRuntimeConfig {
   failOn: DriftFailSeverity[];
   projectContextPath: string;
@@ -126,36 +113,8 @@ function sortStrings(values: string[]): string[] {
   return [...values].sort((left, right) => left.localeCompare(right));
 }
 
-function rootReadme(filePath: string): boolean {
-  return !filePath.includes("/") && /^README/i.test(path.basename(filePath));
-}
-
-function docsReadme(filePath: string): boolean {
-  return filePath.startsWith("docs/") && /^README/i.test(path.basename(filePath));
-}
-
-function importantFile(filePath: string): boolean {
-  if (rootReadme(filePath)) {
-    return true;
-  }
-  if (filePath.startsWith("docs/")) {
-    return true;
-  }
-  if (filePath.includes("/auth/") || filePath.startsWith("auth/")) {
-    return true;
-  }
-  if (filePath === "CODEOWNERS" || filePath === "LICENSE" || filePath === "SECURITY.md") {
-    return true;
-  }
-  return filePath.startsWith(".github/workflows/") && filePath.split("/").length === 3;
-}
-
 function manifestFile(filePath: string): boolean {
   return MANIFEST_NAMES.has(path.basename(filePath));
-}
-
-function lockfile(filePath: string): boolean {
-  return LOCKFILE_NAMES.has(path.basename(filePath));
 }
 
 function normalizeReadmeText(text: string): string {
@@ -302,40 +261,6 @@ async function readCommits(repoPath: string, maxCommits: number): Promise<Commit
   }
 }
 
-async function buildTreeSummary(repoPath: string, maxDepth: number, config: DriftRuntimeConfig): Promise<string> {
-  const lines: string[] = [];
-
-  async function walk(relativeDir: string, depth: number): Promise<void> {
-    if (depth > maxDepth) {
-      return;
-    }
-
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await readdir(path.join(repoPath, relativeDir), { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (entry.isDirectory() && ADAPTER_IGNORED_SEGMENTS.has(entry.name)) {
-        continue;
-      }
-      const childRelative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-      if (generatedContextPath(childRelative, config)) {
-        continue;
-      }
-      lines.push(`${"  ".repeat(depth)}${childRelative}${entry.isDirectory() ? "/" : ""}`);
-      if (entry.isDirectory()) {
-        await walk(childRelative, depth + 1);
-      }
-    }
-  }
-
-  await walk("", 0);
-  return lines.join("\n");
-}
-
 async function resolveRuntimeConfig(repoPath: string): Promise<DriftRuntimeConfig> {
   if (await fileExists(getAxiContextConfigPath(repoPath))) {
     const config = await loadAxiContextConfig(repoPath);
@@ -361,30 +286,15 @@ async function resolveRuntimeConfig(repoPath: string): Promise<DriftRuntimeConfi
 
 async function computeGitAdapterDigest(
   repoPath: string,
-  files: string[],
   config: DriftRuntimeConfig,
-  dependencyRecords: DependencyRecord[],
-  treeSummary: string
+  analysisDigest: string
 ): Promise<string> {
-  const adapterFiles = sortStrings(files.filter((file) => !hasIgnoredSegment(file)));
-  const rootReadmes = adapterFiles.filter(rootReadme);
-  const docReadmes = adapterFiles.filter(docsReadme);
-  const importantFiles = sortStrings(adapterFiles.filter(importantFile)).slice(0, config.maxFiles);
-  const manifestFiles = adapterFiles.filter(manifestFile);
-  const lockfiles = adapterFiles.filter(lockfile);
   const commits = await readCommits(repoPath, config.maxCommits);
-  const dependencies = dependencyRecords.map((record) => [`dep:${record.name}`, record]);
 
   return sha256(
     stableStringify({
-      rootReadmes,
-      docReadmes,
-      importantFiles,
-      manifests: manifestFiles,
-      lockfiles,
-      dependencies,
-      commits,
-      treeSummary
+      analysis_digest: analysisDigest,
+      commits
     })
   );
 }
@@ -439,8 +349,8 @@ function readGraphSignals(repoPath: string): {
 async function collectCurrentSignals(repoPath: string, config: DriftRuntimeConfig): Promise<CurrentSignals> {
   const files = await listRepoFiles(repoPath);
   const visibleFiles = files.filter((file) => !hasIgnoredSegment(file) && !generatedContextPath(file, config));
-  const treeSummary = await buildTreeSummary(repoPath, config.maxTreeDepth, config);
-  const fileTreeDigest = sha256(treeSummary);
+  const analysis = await analyzeRepo(repoPath, { maxDepth: config.maxTreeDepth });
+  const fileTreeDigest = analysis.tree.digest;
 
   const readmeCandidates = sortStrings(visibleFiles.filter((p) => /^README/i.test(path.basename(p))));
   const readmePath = readmeCandidates[0] ?? "README.md";
@@ -469,7 +379,7 @@ async function collectCurrentSignals(repoPath: string, config: DriftRuntimeConfi
 
   return {
     adapterDigests: {
-      git: await computeGitAdapterDigest(repoPath, visibleFiles, config, allDependencyRecords, treeSummary)
+      git: await computeGitAdapterDigest(repoPath, config, analysis.digest)
     },
     contentHash,
     fileTreeDigest,

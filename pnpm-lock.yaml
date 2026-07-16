@@ -26,6 +26,9 @@ importers:
       '@latticeag/axicontext-parsers':
         specifier: workspace:*
         version: link:../parsers
+      fast-glob:
+        specifier: ^3.3.3
+        version: 3.3.3
 
   packages/cli:
     dependencies:
@@ -47,6 +50,9 @@ importers:
       '@iarna/toml':
         specifier: ^2.2.5
         version: 2.2.5
+      '@latticeag/axicontext-parsers':
+        specifier: workspace:*
+        version: link:../parsers
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13

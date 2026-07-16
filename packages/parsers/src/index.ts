@@ -150,6 +150,9 @@ const AnalyzeOptionsSchema = z
 const IGNORE_DIRS = [
   "node_modules",
   ".git",
+  ".axicontext/cache",
+  ".axicontext/graph",
+  ".axicontext/state",
   "dist",
   "build",
   ".next",
@@ -158,6 +161,7 @@ const IGNORE_DIRS = [
   "target",
   "out",
 ];
+const IGNORE_FILES = [".axicontext/manifest.json", "PROJECT_CONTEXT.md"];
 
 const LOCKFILE_PACKAGE_MANAGERS = new Map<string, PackageManager>([
   ["pnpm-lock.yaml", "pnpm"],
@@ -291,7 +295,7 @@ export async function analyzeRepo(root: string, opts?: AnalyzeOptions): Promise<
 }
 
 function listRepoFiles(root: string, options: AnalyzeOptions): Promise<string[]> {
-  const ignore = IGNORE_DIRS.map((directory) => `**/${directory}/**`);
+  const ignore = [...IGNORE_DIRS.map((directory) => `**/${directory}/**`), ...IGNORE_FILES];
   return fg(["**/*"], {
     cwd: root,
     dot: true,

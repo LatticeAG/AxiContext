@@ -566,26 +566,26 @@ Performance budgets: SPEC.md §24 (best-effort; CI fails on functional tests onl
 
 ## 12. Implementation checklist
 
-- [ ] P0.1 Delete duplicate modules + package-lock.json
-- [ ] P0.2 Create `packages/parsers` with `analyzeRepo` + tests
-- [ ] P0.3 Refactor `adapters-git` onto parsers + SPEC node IDs
-- [ ] P0.4 Invert deps: CLI registry; core has no adapter dependency
-- [ ] P1.1 Add better-sqlite3; export GraphStore from core index
-- [ ] P1.2 Rewrite `runSync` → SQLite + config load + injected adapters
-- [ ] P1.3 Implement `policy.ts` + wire into sync
-- [ ] P1.4 PROJECT_CONTEXT headings + manual preserve + banner
-- [ ] P1.5 Config/Zod complete; api_token works; init/doctor complete
-- [ ] P2.1 Drift digest alignment + fail_on + sarif + annotations
-- [ ] P2.2 Query via FTS GraphStore
-- [ ] P2.3 Server SPEC shapes + ETag + bind refuse
-- [ ] P2.4 CLI flags/exit codes complete; remove dead CLI files
-- [ ] P3.1 SDK fromRepo/connect
-- [ ] P3.2 Docs + README honesty + CONTRIBUTING/SECURITY/CHANGELOG
-- [ ] P3.3 CI E2E + publish workflow + package metadata
+- [x] P0.1 Delete duplicate modules + package-lock.json
+- [x] P0.2 Create `packages/parsers` with `analyzeRepo` + tests
+- [x] P0.3 Refactor `adapters-git` onto parsers + SPEC node IDs
+- [x] P0.4 Invert deps: CLI registry; core has no adapter dependency
+- [x] P1.1 Add better-sqlite3; export GraphStore from core index
+- [x] P1.2 Rewrite `runSync` → SQLite + config load + injected adapters
+- [x] P1.3 Implement `policy.ts` + wire into sync
+- [x] P1.4 PROJECT_CONTEXT headings + manual preserve + banner
+- [x] P1.5 Config/Zod complete; api_token works; init/doctor complete
+- [x] P2.1 Drift digest alignment + fail_on + sarif + annotations
+- [x] P2.2 Query via FTS GraphStore
+- [x] P2.3 Server SPEC shapes + ETag + bind refuse
+- [x] P2.4 CLI flags/exit codes complete; remove dead CLI files
+- [x] P3.1 SDK fromRepo/connect
+- [x] P3.2 Docs + README honesty + CONTRIBUTING/SECURITY/CHANGELOG
+- [x] P3.3 CI E2E + publish workflow + package metadata
 - [ ] P3.4 Tag and publish AxiContext 0.1.0
-- [ ] P4.1 `fence-core` inference + generators + tests
-- [ ] P4.2 `fence` CLI check/run/badge
-- [ ] P4.3 Fence fixtures + docs/fence.md
+- [x] P4.1 `fence-core` inference + generators + tests
+- [x] P4.2 `fence` CLI check/run/badge
+- [x] P4.3 Fence fixtures + docs/fence.md
 - [ ] P4.4 Publish AxiFence 0.1.0
 
 ---

@@ -70,6 +70,11 @@ function normalizeFtsQuery(query: string): string {
     .join(" ");
 }
 
+function ftsTextForExcerpt(excerpt: AddExcerptInput): string {
+  const pathValue = excerpt.provenance.path;
+  return pathValue ? `${pathValue}\n${excerpt.text}` : excerpt.text;
+}
+
 function estimateTokens(value: unknown): number {
   return Math.max(1, Math.ceil(JSON.stringify(value).length / 4));
 }
@@ -198,7 +203,7 @@ export class GraphStore {
       });
 
     this.db.prepare("DELETE FROM fts WHERE id = ?").run(id);
-    this.db.prepare("INSERT INTO fts (id, text) VALUES (?, ?)").run(id, parsed.text);
+    this.db.prepare("INSERT INTO fts (id, text) VALUES (?, ?)").run(id, ftsTextForExcerpt(parsed));
 
     const row = this.db.prepare("SELECT * FROM excerpts WHERE id = ?").get(id) as
       | ExcerptRow

@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "@latticeag/axicontext-parsers": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.11.1",
     "zod": "^3.25.76"

@@ -243,10 +243,8 @@ function buildGlossary(depNames: string[], ecosystems: string[]): string[] {
 
 function buildProvenance(input: ProjectContextInput, excerptCount: number): string[] {
   const lines = [
-    `- Generated at: ${input.manifest.generated_at}`,
     `- Manifest schema: ${input.manifest.schema_version}`,
     `- Content hash: ${input.manifest.content_hash}`,
-    `- Project context hash: ${input.manifest.project_context_hash}`,
     `- Project root: \`${input.manifest.project_root}\``,
     `- Graph stats: ${input.manifest.stats.node_count} nodes, ${input.manifest.stats.edge_count} edges, ${excerptCount} excerpts`,
   ];
