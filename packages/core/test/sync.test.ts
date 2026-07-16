@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -6,6 +6,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { GitSourceAdapter } from "../../adapters-git/src/index.js";
+import { DEFAULT_CONFIG_TOML } from "../src/constants.js";
 import { runSync } from "../src/sync.js";
 
 const execFile = promisify(execFileCallback);
@@ -69,7 +70,10 @@ describe("git adapter and sync pipeline", () => {
   it("runSync writes manifest and PROJECT_CONTEXT.md", async () => {
     const repoRoot = await createTempFixtureRepo();
     try {
-      const result = await runSync(repoRoot, { maxChars: 10_000 });
+      const result = await runSync(repoRoot, {
+        adapters: [new GitSourceAdapter()],
+        maxChars: 10_000,
+      });
 
       const manifestJson = JSON.parse(await readFile(result.manifestPath, "utf8")) as {
         schema_version: string;
@@ -83,13 +87,17 @@ describe("git adapter and sync pipeline", () => {
       const projectContext = await readFile(result.projectContextPath, "utf8");
       expect(projectContext.startsWith("<!-- axi:generated managed-by=axictx schema=1.0.0 hash=sha256:")).toBe(true);
       expect(projectContext).toContain("## Overview");
-      expect(projectContext).toContain("## Monorepo/Packages");
+      expect(projectContext).toContain("## Monorepo / Packages");
       expect(projectContext).toContain("## Architecture");
       expect(projectContext).toContain("## Key Entry Points");
       expect(projectContext).toContain("## Auth & Security");
-      expect(projectContext).toContain("## Tooling");
-      expect(projectContext).toContain("## Open Issues");
-      expect(projectContext).toContain("## Provenance");
+      expect(projectContext).toContain("## Data & Storage");
+      expect(projectContext).toContain("## APIs & Integrations");
+      expect(projectContext).toContain("## Tooling & Local Dev");
+      expect(projectContext).toContain("## Open Issues & Active Work");
+      expect(projectContext).toContain("## Decisions (ADRs)");
+      expect(projectContext).toContain("## Glossary");
+      expect(projectContext).toContain("## Provenance & Manifest");
       expect(projectContext.length).toBeLessThanOrEqual(10_000);
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
@@ -123,5 +131,7 @@ async function createTempFixtureRepo(): Promise<string> {
   await writeFile(path.join(tempRoot, "docs", "README.md"), "# Docs README\n\nUpdated fixture docs.\n", "utf8");
   await execFile("git", ["-C", tempRoot, "add", "docs/README.md"]);
   await execFile("git", ["-C", tempRoot, "commit", "--no-gpg-sign", "-m", "update docs readme"]);
+  await mkdir(path.join(tempRoot, ".axicontext"), { recursive: true });
+  await writeFile(path.join(tempRoot, ".axicontext", "config.toml"), DEFAULT_CONFIG_TOML, "utf8");
   return tempRoot;
 }

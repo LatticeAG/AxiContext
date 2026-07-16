@@ -7,7 +7,8 @@ import {
   DEFAULT_PROJECT_CONTEXT_PATH,
   GITIGNORE_SUGGESTIONS,
 } from "./constants.js";
-import type { InitResult, RepositoryType } from "./types.js";
+import type { Ecosystem, InitResult, RepositoryType } from "./types.js";
+import { sha256 } from "./utils.js";
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
@@ -18,23 +19,33 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function detectRepositoryType(repoRoot = process.cwd()): Promise<RepositoryType> {
-  const checks: Array<[RepositoryType, string[]]> = [
+export async function detectRepositoryEcosystems(repoRoot = process.cwd()): Promise<Ecosystem[]> {
+  const checks: Array<[Ecosystem, string[]]> = [
     ["node", ["package.json"]],
     ["python", ["pyproject.toml", "requirements.txt", "setup.py"]],
     ["rust", ["Cargo.toml"]],
     ["go", ["go.mod"]],
   ];
+  const ecosystems: Ecosystem[] = [];
 
   for (const [type, files] of checks) {
     for (const file of files) {
       if (await pathExists(path.join(repoRoot, file))) {
-        return type;
+        ecosystems.push(type);
+        break;
       }
     }
   }
 
-  return "unknown";
+  return ecosystems;
+}
+
+export async function detectRepositoryType(repoRoot = process.cwd()): Promise<RepositoryType> {
+  const ecosystems = await detectRepositoryEcosystems(repoRoot);
+  if (ecosystems.length > 1) {
+    return "mixed";
+  }
+  return ecosystems[0] ?? "unknown";
 }
 
 function getMissingGitignoreEntries(gitignoreContent: string): string[] {
@@ -51,6 +62,18 @@ function getMissingGitignoreEntries(gitignoreContent: string): string[] {
 export interface ScaffoldOptions {
   repoRoot?: string;
   overwriteConfig?: boolean;
+}
+
+function buildProjectContextStub(): string {
+  const body = [
+    "# Project Context",
+    "",
+    "<!-- axi:manual -->",
+    "Describe architecture, constraints, and coding standards here. axictx preserves this block on sync.",
+    "<!-- /axi:manual -->",
+    "",
+  ].join("\n");
+  return `<!-- axi:generated managed-by=axictx schema=1.0.0 hash=${sha256(body)} -->\n${body}`;
 }
 
 export async function scaffoldAxiContext(options: ScaffoldOptions = {}): Promise<InitResult> {
@@ -70,19 +93,19 @@ export async function scaffoldAxiContext(options: ScaffoldOptions = {}): Promise
 
   const projectContextExists = await pathExists(projectContextPath);
   if (!projectContextExists) {
-    await writeFile(
-      projectContextPath,
-      "# Project Context\n\nDescribe architecture, constraints, and coding standards.\n",
-      "utf8",
-    );
+    await writeFile(projectContextPath, buildProjectContextStub(), "utf8");
   }
 
   const rootGitignoreExists = await pathExists(rootGitignorePath);
   const gitignoreContent = rootGitignoreExists ? await readFile(rootGitignorePath, "utf8") : "";
   const missingGitignoreEntries = getMissingGitignoreEntries(gitignoreContent);
 
+  const ecosystems = await detectRepositoryEcosystems(repoRoot);
+
   return {
-    repositoryType: await detectRepositoryType(repoRoot),
+    repositoryType: ecosystems.length > 1 ? "mixed" : ecosystems[0] ?? "unknown",
+    ecosystems,
+    mixed: ecosystems.length > 1,
     configPath,
     createdAxiContextDir: !hadAxiContextDir,
     createdConfig: !configExists || !!options.overwriteConfig,

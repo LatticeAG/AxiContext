@@ -2,7 +2,9 @@ export type DriftSeverity = "info" | "low" | "medium" | "high" | "critical";
 
 export interface ManifestAdapterEntry {
   digest?: string;
+  ingested_at?: string;
   stats?: Record<string, number | string | boolean>;
+  warnings?: string[];
   direct?: string[];
   deps?: string[];
   paths?: string[];
@@ -14,6 +16,11 @@ export interface Manifest {
   generated_at?: string;
   project_root?: string;
   content_hash?: string;
+  stats?: {
+    node_count: number;
+    edge_count: number;
+    excerpt_count?: number;
+  };
   adapters: Record<string, ManifestAdapterEntry>;
   embedding_model?: string;
   policy_pack?: string;
@@ -114,13 +121,21 @@ export interface AxiConfig {
   serve: ServeConfig;
   query: {
     max_tokens_default: number;
+    embeddings: "off" | "auto";
   };
+  repo_root: string;
+  config_path: string;
+  github_token?: string;
+  ci: boolean;
 }
 
-export type RepositoryType = "node" | "python" | "rust" | "go" | "unknown";
+export type RepositoryType = "node" | "python" | "rust" | "go" | "mixed" | "unknown";
+
+export type DriftFailSeverity = "low" | "medium" | "high" | "critical";
+export type Ecosystem = Exclude<RepositoryType, "mixed" | "unknown">;
 
 export interface AxiContextConfig {
-  schema_version: string;
+  schema_version: "1.0.0";
   project: {
     name: string;
     default_branch: string;
@@ -129,26 +144,48 @@ export interface AxiContextConfig {
     path: string;
     commit: boolean;
     max_chars: number;
+    llm_polish: false;
   };
   serve: {
     host: string;
     port: number;
+    api_token: string;
   };
   drift: {
-    fail_on: Array<"low" | "medium" | "high" | "critical">;
+    fail_on: DriftFailSeverity[];
+    ignore_paths: string[];
   };
   adapters: {
     git: {
       enabled: boolean;
+      important_path_globs: string[];
+      recent_commits: number;
+      max_excerpt_files: number;
+      max_lines_per_file: number;
+      tree_max_depth: number;
     };
     github_issues: {
       enabled: boolean;
+      state: "open" | "closed" | "all";
+      max_issues: number;
+      label_include: string[];
+      label_exclude: string[];
     };
+  };
+  query: {
+    max_tokens_default: number;
+    embeddings: "off" | "auto";
+  };
+  policy: {
+    denylist_globs: string[];
+    redact_patterns: string[];
   };
 }
 
 export interface InitResult {
   repositoryType: RepositoryType;
+  ecosystems: Ecosystem[];
+  mixed: boolean;
   configPath: string;
   createdAxiContextDir: boolean;
   createdConfig: boolean;
@@ -186,7 +223,10 @@ export interface ResolvedSyncConfig {
   adapterIds?: string[];
 }
 
-export type SyncConfig = Partial<ResolvedSyncConfig>;
+export type SyncConfig = Partial<ResolvedSyncConfig> & {
+  adapters?: SourceAdapter[];
+  dryRun?: boolean;
+};
 
 export interface IngestContext extends RepoContext {
   config: ResolvedSyncConfig;
@@ -208,23 +248,27 @@ export interface SourceAdapter {
 }
 
 export interface SyncManifest {
-  schema_version: string;
+  schema_version: "1.0.0";
+  axictx_version: string;
   generated_at: string;
   project_root: string;
   content_hash: string;
+  project_context_hash: string;
+  embedding_model: "none";
+  policy_pack: string;
   adapters: Record<
     string,
     {
       digest: string;
+      ingested_at: string;
       warnings: string[];
-      node_count: number;
-      edge_count: number;
-      metadata: Record<string, unknown>;
+      stats: Record<string, number | string | boolean>;
     }
   >;
   stats: {
     node_count: number;
     edge_count: number;
+    excerpt_count: number;
   };
 }
 
