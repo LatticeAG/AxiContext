@@ -118,8 +118,8 @@
 - [ ] I6 Parsers runtime files + packageManager + digest portability test
 - [ ] I7 Fence env_keys, ports, overwrite refuse, secret fixture, badge label
 - [ ] I8 SDK in-process slice + clear unsynced errors
-- [ ] I9 Golden headings test + e2e-cli + fence compose test
-- [ ] I10 README/docs/CHANGELOG + CI pnpm cache
+- [x] I9 Golden headings test + e2e-cli + fence compose test
+- [x] I10 README/docs/CHANGELOG + CI pnpm cache
 
 ---
 

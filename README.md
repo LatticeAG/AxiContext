@@ -11,27 +11,33 @@ The goal is simple: give agents a truthful project memory that can be regenerate
 - [SPEC.md](./SPEC.md) defines AxiContext OSS behavior.
 - [SPEC-BUILD.md](./SPEC-BUILD.md) defines the build phases and package layout.
 - [SPEC-AxiFence.md](./SPEC-AxiFence.md) defines the AxiFence companion CLI.
+- [SPEC-IMPROVE.md](./SPEC-IMPROVE.md) tracks the current quality pass.
 
 ## What works in this repository
 
-- `axictx init` creates `.axicontext/config.toml` and a starter `PROJECT_CONTEXT.md`.
-- `axictx sync` ingests local repo signals, writes `.axicontext/manifest.json`, creates the SQLite graph, and regenerates `PROJECT_CONTEXT.md`.
-- `axictx drift` compares the current repo against the saved manifest and can fail CI.
-- `axictx query` returns keyword-ranked context excerpts with provenance.
-- `axictx serve` starts the local HTTP Agent Read API, defaulting to `127.0.0.1:8787`.
-- `@latticeag/axicontext-sdk` provides a thin TypeScript client path for in-process and HTTP use.
+| Area | Status |
+|------|--------|
+| `axictx init` | Creates `.axicontext/config.toml` and a starter `PROJECT_CONTEXT.md`. |
+| `axictx sync` | Runs local adapters, writes `.axicontext/manifest.json`, creates the SQLite graph, and regenerates `PROJECT_CONTEXT.md`. |
+| `axictx drift` | Compares the current repo against the saved manifest, with CI annotations and fail-on-drift support. |
+| `axictx query` | Searches graph excerpts with provenance. |
+| `axictx serve` | Starts the loopback Agent Read API on `127.0.0.1:8787` by default. |
+| `@latticeag/axicontext-sdk` | Provides in-process and HTTP client helpers. |
+| `axi-fence check` | Scores whether a repo has enough setup metadata for a generated DevContainer. |
+| `axi-fence run` | Generates reviewable DevContainer, compose, bootstrap, and setup docs. |
+| `axi-fence badge` | Prints a Shields badge or JSON status for setup readiness. |
 
-AxiContext currently performs a full sync. Incremental sync, cloud sync, hosted dashboards, embeddings, and MCP are not claimed for v0.1. AxiFence is specified in this monorepo and is built as sibling packages in the later Fence phase.
+AxiContext currently performs a full sync. Incremental sync, cloud sync, hosted dashboards, embeddings, and MCP are not claimed for v0.1. AxiFence is deterministic and rule-based. It does not call an LLM.
 
-## Quickstart for users
+## Quickstart for AxiContext
 
-Install from npm once packages are published:
+Install the CLI once packages are published:
 
 ```bash
 npm install -g @latticeag/axicontext
 ```
 
-Or run the CLI without a global install:
+Or run it without a global install:
 
 ```bash
 npx @latticeag/axicontext init
@@ -53,6 +59,26 @@ For CI:
 ```bash
 axictx drift --ci --fail-on-drift
 ```
+
+## Quickstart for AxiFence
+
+Install the companion CLI once packages are published:
+
+```bash
+npm install -g @latticeag/axi-fence
+```
+
+Use it inside a repository:
+
+```bash
+cd your-repo
+axi-fence check .
+axi-fence run . --dry-run
+axi-fence run . --out . --overwrite
+axi-fence badge . --json
+```
+
+`axi-fence run` writes `.devcontainer/devcontainer.json`, an optional `.devcontainer/docker-compose.yml`, `scripts/bootstrap.sh`, and `README-SETUP.md`. Use `--dry-run` to review generated content before writing files.
 
 ## Quickstart for contributors
 
