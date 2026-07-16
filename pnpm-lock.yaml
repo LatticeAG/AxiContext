@@ -26,6 +26,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@latticeag/axicontext-adapter-git':
+        specifier: workspace:*
+        version: link:../adapters-git
       '@latticeag/axicontext-core':
         specifier: workspace:*
         version: link:../core
