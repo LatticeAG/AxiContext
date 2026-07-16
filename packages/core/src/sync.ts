@@ -101,6 +101,7 @@ function canonicalEdgeType(edge: GraphEdge): UpsertEdgeInput["type"] {
 function canonicalNodeData(node: GraphNode): Record<string, unknown> {
   const data = { ...node.attributes };
   delete data.excerpt;
+  delete data.excerpt_provenance;
   if (node.type === "repo" && typeof data.name !== "string") {
     data.name = node.id.slice("repo:".length);
   }
@@ -129,15 +130,45 @@ function nodeToExcerpt(adapterId: string, node: GraphNode, ingestedAt: string): 
   if (typeof excerptText !== "string" || !excerptText.trim()) {
     return null;
   }
-  return {
-    id: sha256(`${excerptText}${stableStringify({ adapter: adapterId, path: excerptPath, ingested_at: ingestedAt })}`),
-    text: excerptText,
-    provenance: {
-      adapter: adapterId,
-      path: typeof excerptPath === "string" ? excerptPath : undefined,
-      ingested_at: ingestedAt,
-    },
+  const suppliedProvenance = extractExcerptProvenance(node.attributes.excerpt_provenance);
+  const provenance = {
+    adapter: suppliedProvenance.adapter ?? adapterId,
+    path: suppliedProvenance.path ?? (typeof excerptPath === "string" ? excerptPath : undefined),
+    commit: suppliedProvenance.commit,
+    start_line: suppliedProvenance.start_line,
+    end_line: suppliedProvenance.end_line,
+    ingested_at: ingestedAt,
   };
+  return {
+    id: sha256(`${excerptText}${stableStringify(provenance)}`),
+    text: excerptText,
+    provenance,
+  };
+}
+
+interface ExcerptProvenanceParts {
+  adapter?: string;
+  path?: string;
+  commit?: string;
+  start_line?: number;
+  end_line?: number;
+}
+
+function extractExcerptProvenance(value: unknown): ExcerptProvenanceParts {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return {
+    adapter: typeof value.adapter === "string" ? value.adapter : undefined,
+    path: typeof value.path === "string" ? value.path : undefined,
+    commit: typeof value.commit === "string" ? value.commit : undefined,
+    start_line: typeof value.start_line === "number" ? value.start_line : undefined,
+    end_line: typeof value.end_line === "number" ? value.end_line : undefined,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function canonicalizeAdapterResult(result: AdapterResult, ingestedAt: string): CanonicalGraph {

@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { execFile as execFileCallback } from "node:child_process";
 
-import fg from "fast-glob";
+import { analyzeRepo } from "@latticeag/axicontext-parsers";
+import type { ManifestFact, PathFact, RepoAnalysis } from "@latticeag/axicontext-parsers";
 
 import type {
   AdapterResult,
@@ -13,75 +14,28 @@ import type {
   IngestContext,
   RepoContext,
   SourceAdapter,
-} from "./types.js";
+} from "@latticeag/axicontext-core";
 
 const execFile = promisify(execFileCallback);
 
-const IGNORED_GLOBS = [
-  "**/node_modules/**",
-  "**/.git/**",
-  "**/dist/**",
-  "**/build/**",
-  "**/.next/**",
-  "**/coverage/**",
-  "**/.turbo/**",
-  "**/target/**",
-  "**/out/**",
-];
-
-const IMPORTANT_GLOBS = [
-  "README*",
-  "docs/**",
-  "**/auth/**",
-  "CODEOWNERS",
-  "LICENSE",
-  "SECURITY.md",
-  ".github/workflows/*",
-];
-
-const MANIFEST_GLOBS = [
-  "**/package.json",
-  "**/pyproject.toml",
-  "**/Cargo.toml",
-  "**/go.mod",
-  "**/pom.xml",
-];
-
-const LOCKFILE_GLOBS = [
-  "**/package-lock.json",
-  "**/pnpm-lock.yaml",
-  "**/yarn.lock",
-  "**/bun.lockb",
-  "**/bun.lock",
-  "**/poetry.lock",
-  "**/Cargo.lock",
-  "**/go.sum",
-  "**/Pipfile.lock",
-  "**/composer.lock",
-];
-
-const SKIP_TREE_DIRS = new Set([
-  ".git",
-  "node_modules",
-  "dist",
-  "build",
-  ".next",
-  "coverage",
-  "target",
-  "out",
-  ".turbo",
-]);
-
-interface DependencyRecord {
+interface DependencyNodeRecord {
   name: string;
-  version: string;
-  source: string;
+  ecosystem: string;
+  versions: Set<string>;
+  kinds: Set<string>;
+  manifests: Set<string>;
 }
 
 interface CommitRecord {
   sha: string;
   date: string;
   message: string;
+}
+
+interface ExcerptRecord {
+  text: string;
+  startLine: number;
+  endLine: number;
 }
 
 export class GitSourceAdapter implements SourceAdapter {
@@ -105,130 +59,148 @@ export class GitSourceAdapter implements SourceAdapter {
   }
 
   async ingest(ctx: IngestContext): Promise<AdapterResult> {
-    const warnings: string[] = [];
+    const analysis = await analyzeRepo(ctx.repoRoot, {
+      maxDepth: ctx.config.maxTreeDepth,
+    });
+    const warnings = [...analysis.warnings];
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
+    const projectNodeId = projectId(analysis.project_name);
+    const dependencyMap = new Map<string, DependencyNodeRecord>();
 
-    const repoNodeId = `repo:${path.basename(ctx.repoRoot)}`;
-    const dependencyMap = new Map<string, DependencyRecord>();
-
-    const rootReadmes = await this.glob(["README*"], ctx.repoRoot);
-    const docReadmes = await this.glob(["docs/**/README*"], ctx.repoRoot);
-    const importantFiles = await this.glob(IMPORTANT_GLOBS, ctx.repoRoot);
-    const manifestFiles = await this.glob(MANIFEST_GLOBS, ctx.repoRoot);
-    const lockfiles = await this.glob(LOCKFILE_GLOBS, ctx.repoRoot);
     const commits = await this.readCommits(ctx.repoRoot, ctx.config.maxCommits, warnings);
-    const treeSummary = await buildTreeSummary(ctx.repoRoot, ctx.config.maxTreeDepth, warnings);
+    const excerptCommit = commits[0]?.sha;
+    const fileFacts = collectFileFacts(analysis);
+    const excerptPaths = [...fileFacts.values()]
+      .filter((fact) => isExcerptRole(fact.role))
+      .map((fact) => fact.path)
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, ctx.config.maxFiles);
+    const excerpts = new Map<string, ExcerptRecord>();
 
-    const excerptCandidates = [...new Set([...rootReadmes, ...docReadmes, ...importantFiles])];
-    const boundedExcerptFiles = excerptCandidates.sort((a, b) => a.localeCompare(b)).slice(0, ctx.config.maxFiles);
-
-    for (const relativePath of boundedExcerptFiles) {
+    for (const relativePath of excerptPaths) {
       const excerpt = await this.readExcerpt(ctx.repoRoot, relativePath, ctx.config.maxLinesPerFile, warnings);
       if (!excerpt) {
         continue;
       }
-      const fileNodeId = `file:${relativePath}`;
-      const type = /(^README|README)/i.test(path.basename(relativePath)) ? "readme" : "important_file";
-      nodes.push({
-        id: fileNodeId,
-        type,
-        attributes: {
-          path: relativePath,
-          excerpt,
-        },
-      });
-      edges.push({
-        from: repoNodeId,
-        to: fileNodeId,
-        type: "contains",
-      });
+      excerpts.set(relativePath, excerpt);
     }
 
-    for (const relativePath of manifestFiles.sort((a, b) => a.localeCompare(b))) {
-      const manifestNodeId = `manifest:${relativePath}`;
-      const ecosystem = detectEcosystem(relativePath);
+    nodes.push({
+      id: projectNodeId,
+      type: "project",
+      attributes: compactObject({
+        name: analysis.project_name,
+        root: analysis.root,
+        ecosystems: analysis.ecosystems,
+        mixed: analysis.mixed,
+        package_manager: analysis.package_manager,
+        analysis_digest: analysis.digest,
+      }),
+    });
+
+    for (const manifest of analysis.manifests) {
+      const manifestNodeId = moduleId(manifest.path);
       nodes.push({
         id: manifestNodeId,
-        type: "package_manifest",
-        attributes: {
-          path: relativePath,
-          ecosystem,
-        },
+        type: "module",
+        attributes: manifestAttributes(manifest),
       });
       edges.push({
-        from: repoNodeId,
+        from: projectNodeId,
         to: manifestNodeId,
         type: "contains",
       });
 
-      const deps = await this.parseManifestDependencies(ctx.repoRoot, relativePath, warnings);
-      for (const dep of deps) {
-        const depId = `dep:${dep.name}`;
-        dependencyMap.set(depId, dep);
+      for (const dep of manifest.dependencies) {
+        const depNodeId = dependencyId(manifest.ecosystem, dep.name);
+        const record =
+          dependencyMap.get(depNodeId) ??
+          {
+            name: dep.name,
+            ecosystem: manifest.ecosystem,
+            versions: new Set<string>(),
+            kinds: new Set<string>(),
+            manifests: new Set<string>(),
+          };
+        if (dep.version) {
+          record.versions.add(dep.version);
+        }
+        record.kinds.add(dep.kind);
+        record.manifests.add(manifest.path);
+        dependencyMap.set(depNodeId, record);
         edges.push({
           from: manifestNodeId,
-          to: depId,
+          to: depNodeId,
           type: "depends_on",
-          attributes: {
+          attributes: compactObject({
+            kind: dep.kind,
             version: dep.version,
-            source: dep.source,
-          },
+            manifest: manifest.path,
+          }),
         });
       }
     }
 
-    for (const [depId, dep] of [...dependencyMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [depNodeId, dep] of [...dependencyMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const versions = [...dep.versions].sort((a, b) => a.localeCompare(b));
       nodes.push({
-        id: depId,
+        id: depNodeId,
         type: "dependency",
-        attributes: {
+        attributes: compactObject({
           name: dep.name,
-          version: dep.version,
-          source: dep.source,
-        },
+          ecosystem: dep.ecosystem,
+          version: versions.length === 1 ? versions[0] : undefined,
+          versions,
+          kinds: [...dep.kinds].sort((a, b) => a.localeCompare(b)),
+          manifests: [...dep.manifests].sort((a, b) => a.localeCompare(b)),
+        }),
+      });
+    }
+
+    for (const fact of [...fileFacts.values()].sort((a, b) => a.path.localeCompare(b.path))) {
+      const excerpt = excerpts.get(fact.path);
+      const hash = fact.role === "lockfile" ? await this.hashFile(ctx.repoRoot, fact.path, warnings) : undefined;
+      nodes.push({
+        id: fileId(fact.path),
+        type: "file",
+        attributes: compactObject({
+          path: fact.path,
+          role: fact.role,
+          roles: fact.roles,
+          size_bytes: fact.size_bytes,
+          hash,
+          excerpt: excerpt?.text,
+          excerpt_provenance: excerpt
+            ? compactObject({
+                adapter: this.id,
+                path: fact.path,
+                commit: excerptCommit,
+                start_line: excerpt.startLine,
+                end_line: excerpt.endLine,
+              })
+            : undefined,
+        }),
       });
       edges.push({
-        from: repoNodeId,
-        to: depId,
-        type: "references",
+        from: projectNodeId,
+        to: fileId(fact.path),
+        type: "contains",
       });
-    }
-
-    for (const relativePath of lockfiles.sort((a, b) => a.localeCompare(b))) {
-      try {
-        const content = await readFile(path.join(ctx.repoRoot, relativePath), "utf8");
-        const hash = sha256(content);
-        const nodeId = `lockfile:${relativePath}`;
-        nodes.push({
-          id: nodeId,
-          type: "lockfile",
-          attributes: {
-            path: relativePath,
-            hash,
-          },
-        });
-        edges.push({
-          from: repoNodeId,
-          to: nodeId,
-          type: "contains",
-        });
-      } catch (error) {
-        warnings.push(`Failed to hash lockfile ${relativePath}: ${toMessage(error)}`);
-      }
     }
 
     nodes.push({
-      id: "tree:summary",
-      type: "tree_summary",
+      id: treeId(analysis.tree.digest),
+      type: "tree_digest",
       attributes: {
-        depth: ctx.config.maxTreeDepth,
-        summary: treeSummary,
+        digest: analysis.tree.digest,
+        file_count: analysis.tree.files.length,
+        max_depth: ctx.config.maxTreeDepth,
       },
     });
     edges.push({
-      from: repoNodeId,
-      to: "tree:summary",
+      from: projectNodeId,
+      to: treeId(analysis.tree.digest),
       type: "contains",
     });
 
@@ -244,22 +216,16 @@ export class GitSourceAdapter implements SourceAdapter {
         },
       });
       edges.push({
-        from: repoNodeId,
+        from: projectNodeId,
         to: nodeId,
-        type: "history",
+        type: "references",
       });
     }
 
     const digest = sha256(
       stableStringify({
-        rootReadmes,
-        docReadmes,
-        importantFiles: boundedExcerptFiles,
-        manifests: manifestFiles,
-        lockfiles,
-        dependencies: [...dependencyMap.entries()],
+        analysis_digest: analysis.digest,
         commits,
-        treeSummary,
       })
     );
 
@@ -270,22 +236,14 @@ export class GitSourceAdapter implements SourceAdapter {
       digest,
       warnings,
       metadata: {
-        files_excerpted: boundedExcerptFiles.length,
-        manifests: manifestFiles.length,
-        lockfiles: lockfiles.length,
+        files: fileFacts.size,
+        files_excerpted: excerpts.size,
+        manifests: analysis.manifests.length,
+        lockfiles: analysis.lockfiles.length,
         commits: commits.length,
+        analysis_digest: analysis.digest,
       },
     };
-  }
-
-  private async glob(patterns: string[], cwd: string): Promise<string[]> {
-    return fg(patterns, {
-      cwd,
-      dot: false,
-      onlyFiles: true,
-      unique: true,
-      ignore: IGNORED_GLOBS,
-    });
   }
 
   private async readExcerpt(
@@ -293,38 +251,31 @@ export class GitSourceAdapter implements SourceAdapter {
     relativePath: string,
     maxLinesPerFile: number,
     warnings: string[]
-  ): Promise<string | null> {
+  ): Promise<ExcerptRecord | null> {
     try {
       const content = await readFile(path.join(repoRoot, relativePath), "utf8");
       const lines = content.split(/\r?\n/).slice(0, maxLinesPerFile);
-      return lines.join("\n");
+      const text = lines.join("\n");
+      if (!text.trim()) {
+        return null;
+      }
+      return {
+        text,
+        startLine: 1,
+        endLine: lines.length,
+      };
     } catch (error) {
       warnings.push(`Failed to read excerpt for ${relativePath}: ${toMessage(error)}`);
       return null;
     }
   }
 
-  private async parseManifestDependencies(
-    repoRoot: string,
-    relativePath: string,
-    warnings: string[]
-  ): Promise<DependencyRecord[]> {
-    const manifestPath = path.join(repoRoot, relativePath);
+  private async hashFile(repoRoot: string, relativePath: string, warnings: string[]): Promise<string | undefined> {
     try {
-      const content = await readFile(manifestPath, "utf8");
-      if (relativePath.endsWith("package.json")) {
-        return parsePackageJsonDependencies(content);
-      }
-      if (relativePath.endsWith("pyproject.toml")) {
-        return parsePyprojectDependencies(content);
-      }
-      if (relativePath.endsWith("Cargo.toml")) {
-        return parseCargoDependencies(content);
-      }
-      return [];
+      return sha256(await readFile(path.join(repoRoot, relativePath), "utf8"));
     } catch (error) {
-      warnings.push(`Failed to parse dependencies from ${relativePath}: ${toMessage(error)}`);
-      return [];
+      warnings.push(`Failed to hash file ${relativePath}: ${toMessage(error)}`);
+      return undefined;
     }
   }
 
@@ -357,174 +308,125 @@ export class GitSourceAdapter implements SourceAdapter {
   }
 }
 
-function detectEcosystem(relativePath: string): string {
-  const base = path.basename(relativePath);
-  if (base === "package.json") {
-    return "node";
-  }
-  if (base === "pyproject.toml") {
-    return "python";
-  }
-  if (base === "Cargo.toml") {
-    return "rust";
-  }
-  if (base === "go.mod") {
-    return "go";
-  }
-  if (base === "pom.xml") {
-    return "java";
-  }
-  return "unknown";
+interface FileNodeFact extends PathFact {
+  roles: string[];
 }
 
-function parsePackageJsonDependencies(content: string): DependencyRecord[] {
-  const json = JSON.parse(content) as {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-    peerDependencies?: Record<string, string>;
-    optionalDependencies?: Record<string, string>;
-  };
-  const records: DependencyRecord[] = [];
-  const sources: Array<keyof typeof json> = [
-    "dependencies",
-    "devDependencies",
-    "peerDependencies",
-    "optionalDependencies",
-  ];
-  for (const source of sources) {
-    const section = json[source];
-    if (!section) {
-      continue;
-    }
-    for (const [name, version] of Object.entries(section)) {
-      records.push({
-        name,
-        version,
-        source,
-      });
+function collectFileFacts(analysis: RepoAnalysis): Map<string, FileNodeFact> {
+  const files = new Map<string, FileNodeFact>();
+  const manifestPaths = new Set(analysis.manifests.map((manifest) => normalizePath(manifest.path)));
+  for (const file of analysis.tree.files) {
+    if (!manifestPaths.has(normalizePath(file.path))) {
+      addFileFact(files, file, "file");
     }
   }
-  return records;
+  for (const readme of analysis.readmes) {
+    addFileFact(files, readme, "readme");
+  }
+  for (const file of analysis.important_files) {
+    addFileFact(files, file, file.role ?? "important");
+  }
+  for (const workflow of analysis.workflows) {
+    addFileFact(files, workflow, "workflow");
+  }
+  for (const lockfile of analysis.lockfiles) {
+    addFileFact(files, lockfile, "lockfile");
+  }
+  for (const dockerfile of analysis.dockerfiles) {
+    addFileFact(files, dockerfile, "dockerfile");
+  }
+  for (const composeFile of analysis.compose_files) {
+    addFileFact(files, composeFile, "compose");
+  }
+  for (const makefile of analysis.makefiles) {
+    addFileFact(files, makefile, "makefile");
+  }
+  for (const justfile of analysis.justfiles) {
+    addFileFact(files, justfile, "justfile");
+  }
+  for (const envExample of analysis.env_examples) {
+    addFileFact(files, envExample, "env_example");
+  }
+  return files;
 }
 
-function parsePyprojectDependencies(content: string): DependencyRecord[] {
-  const records: DependencyRecord[] = [];
+function addFileFact(files: Map<string, FileNodeFact>, fact: PathFact, fallbackRole: string): void {
+  const normalizedPath = normalizePath(fact.path);
+  const role = fact.role ?? fallbackRole;
+  const existing = files.get(normalizedPath);
+  if (!existing) {
+    files.set(normalizedPath, {
+      path: normalizedPath,
+      role,
+      roles: [role],
+      size_bytes: fact.size_bytes,
+    });
+    return;
+  }
+  if (!existing.roles.includes(role)) {
+    existing.roles.push(role);
+    existing.roles.sort((a, b) => a.localeCompare(b));
+  }
+  existing.role = primaryRole(existing.roles);
+  existing.size_bytes = existing.size_bytes ?? fact.size_bytes;
+}
 
-  const projectDepsMatch = content.match(/\[project\][\s\S]*?dependencies\s*=\s*\[(?<deps>[\s\S]*?)\]/m);
-  if (projectDepsMatch?.groups?.deps) {
-    const deps = extractQuotedValues(projectDepsMatch.groups.deps);
-    for (const dep of deps) {
-      records.push(splitPythonDependency(dep, "project.dependencies"));
+function primaryRole(roles: string[]): string {
+  for (const role of ["readme", "workflow", "lockfile", "docs", "auth", "security", "codeowners", "license"]) {
+    if (roles.includes(role)) {
+      return role;
     }
   }
-
-  const optionalDepsSectionMatch = content.match(/\[project\.optional-dependencies\]([\s\S]*?)(?:\n\[|$)/m);
-  if (optionalDepsSectionMatch?.[1]) {
-    const lines = optionalDepsSectionMatch[1].split("\n");
-    for (const line of lines) {
-      const lineMatch = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=\s*\[(.*)\]\s*$/);
-      if (!lineMatch) {
-        continue;
-      }
-      const depGroup = lineMatch[1];
-      for (const dep of extractQuotedValues(lineMatch[2])) {
-        records.push(splitPythonDependency(dep, `project.optional-dependencies.${depGroup}`));
-      }
-    }
-  }
-
-  return records;
+  return roles[0] ?? "file";
 }
 
-function splitPythonDependency(raw: string, source: string): DependencyRecord {
-  const [name, version = "*"] = raw.split(/(?=[<>=~!])/);
-  return {
-    name: name.trim(),
-    version: version.trim() || "*",
-    source,
-  };
+function isExcerptRole(role: string | undefined): boolean {
+  return role !== undefined && role !== "file" && role !== "lockfile";
 }
 
-function parseCargoDependencies(content: string): DependencyRecord[] {
-  const records: DependencyRecord[] = [];
-  const sections = ["dependencies", "dev-dependencies", "build-dependencies", "workspace.dependencies"];
-  for (const section of sections) {
-    const sectionRegex = new RegExp(`\\[${escapeRegex(section)}\\]([\\s\\S]*?)(?:\\n\\[|$)`, "m");
-    const match = content.match(sectionRegex);
-    if (!match?.[1]) {
-      continue;
-    }
-
-    const lines = match[1].split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) {
-        continue;
-      }
-      const tuple = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.+)$/);
-      if (!tuple) {
-        continue;
-      }
-      const depName = tuple[1];
-      const rhs = tuple[2].trim();
-      let version = "*";
-      if (rhs.startsWith("\"")) {
-        version = rhs.replace(/^"|"$/g, "");
-      } else {
-        const versionMatch = rhs.match(/version\s*=\s*"([^"]+)"/);
-        if (versionMatch) {
-          version = versionMatch[1];
-        }
-      }
-
-      records.push({
-        name: depName,
-        version,
-        source: `cargo.${section}`,
-      });
-    }
-  }
-  return records;
+function manifestAttributes(manifest: ManifestFact): Record<string, unknown> {
+  return compactObject({
+    path: normalizePath(manifest.path),
+    role: "manifest",
+    ecosystem: manifest.ecosystem,
+    kind: manifest.kind,
+    name: manifest.name,
+    size_bytes: manifest.size_bytes,
+    dependency_count: manifest.dependencies.length,
+    scripts: manifest.scripts,
+    engines: manifest.engines,
+    package_manager: manifest.package_manager,
+    workspaces: manifest.workspaces,
+    requires_python: manifest.requires_python,
+    build_system: manifest.build_system,
+    edition: manifest.edition,
+    module: manifest.module,
+    go_version: manifest.go_version,
+  });
 }
 
-async function buildTreeSummary(repoRoot: string, maxDepth: number, warnings: string[]): Promise<string> {
-  const lines: string[] = [];
-
-  async function walk(relativeDir: string, depth: number): Promise<void> {
-    if (depth > maxDepth) {
-      return;
-    }
-    const absoluteDir = path.join(repoRoot, relativeDir);
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await readdir(absoluteDir, { withFileTypes: true });
-    } catch (error) {
-      warnings.push(`Failed to read directory for tree summary ${relativeDir || "."}: ${toMessage(error)}`);
-      return;
-    }
-
-    const sorted = entries.sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of sorted) {
-      if (entry.isDirectory() && SKIP_TREE_DIRS.has(entry.name)) {
-        continue;
-      }
-      const childRelative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-      const indent = "  ".repeat(depth);
-      const suffix = entry.isDirectory() ? "/" : "";
-      lines.push(`${indent}${childRelative}${suffix}`);
-      if (entry.isDirectory()) {
-        await walk(childRelative, depth + 1);
-      }
-    }
-  }
-
-  await walk("", 0);
-  return lines.join("\n");
+function projectId(name: string): string {
+  return `project:${name}`;
 }
 
-function extractQuotedValues(value: string): string[] {
-  const matches = value.match(/"([^"]+)"/g) ?? [];
-  return matches.map((entry) => entry.slice(1, -1));
+function moduleId(relativePath: string): string {
+  return `module:${normalizePath(relativePath)}`;
+}
+
+function dependencyId(ecosystem: string, name: string): string {
+  return `dep:${ecosystem}:${name}`;
+}
+
+function fileId(relativePath: string): string {
+  return `file:${normalizePath(relativePath)}`;
+}
+
+function treeId(digest: string): string {
+  return `tree:${digest}`;
+}
+
+function normalizePath(value: string): string {
+  return value.split(path.sep).join(path.posix.sep);
 }
 
 function stableStringify(value: unknown): string {
@@ -546,12 +448,12 @@ function sortValue(value: unknown): unknown {
   return value;
 }
 
-function sha256(value: string): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+function compactObject(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function sha256(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function toMessage(error: unknown): string {

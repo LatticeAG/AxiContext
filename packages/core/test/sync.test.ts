@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { GitSourceAdapter } from "../../adapters-git/src/index.js";
 import { DEFAULT_CONFIG_TOML } from "../src/constants.js";
+import { GraphStore } from "../src/graphStore.js";
 import { runSync } from "../src/sync.js";
 
 const execFile = promisify(execFileCallback);
@@ -44,24 +45,37 @@ describe("git adapter and sync pipeline", () => {
       expect(commitNodes.length).toBeGreaterThan(0);
       expect(commitNodes.length).toBeLessThanOrEqual(30);
 
-      const manifestNodes = result.nodes.filter((node) => node.type === "package_manifest");
-      expect(manifestNodes.some((node) => node.attributes.path === "package.json")).toBe(true);
+      const projectNode = result.nodes.find((node) => node.id === "project:minimal-node-repo" && node.type === "project");
+      expect(projectNode).toBeDefined();
+
+      const manifestNode = result.nodes.find((node) => node.id === "module:package.json" && node.type === "module");
+      expect(manifestNode?.attributes.path).toBe("package.json");
 
       const dependencies = result.nodes.filter((node) => node.type === "dependency");
-      expect(dependencies.some((node) => node.attributes.name === "express")).toBe(true);
-      expect(dependencies.some((node) => node.attributes.name === "react")).toBe(true);
+      expect(dependencies.some((node) => node.id === "dep:node:express" && node.attributes.name === "express")).toBe(true);
+      expect(dependencies.some((node) => node.id === "dep:node:react" && node.attributes.name === "react")).toBe(true);
 
       const lockfileNode = result.nodes.find(
-        (node) => node.type === "lockfile" && node.attributes.path === "package-lock.json"
+        (node) => node.id === "file:package-lock.json" && node.type === "file" && node.attributes.path === "package-lock.json"
       );
       expect(lockfileNode).toBeDefined();
+      expect(lockfileNode?.attributes.role).toBe("lockfile");
       expect(lockfileNode?.attributes.hash).toMatch(/^sha256:/);
       expect(String(lockfileNode?.attributes.hash)).not.toContain("lockfileVersion");
 
-      const readmeNode = result.nodes.find((node) => node.type === "readme" && node.attributes.path === "README.md");
+      const treeNode = result.nodes.find((node) => node.type === "tree_digest");
+      expect(treeNode?.id).toMatch(/^tree:[a-f0-9]{64}$/);
+
+      const readmeNode = result.nodes.find((node) => node.id === "file:README.md" && node.type === "file");
       expect(readmeNode).toBeDefined();
+      expect(readmeNode?.attributes.role).toBe("readme");
       const excerpt = String(readmeNode?.attributes.excerpt ?? "");
       expect(excerpt.split("\n").length).toBeLessThanOrEqual(200);
+      expect(readmeNode?.attributes.excerpt_provenance).toMatchObject({
+        adapter: "git",
+        path: "README.md",
+        start_line: 1,
+      });
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }
@@ -99,6 +113,19 @@ describe("git adapter and sync pipeline", () => {
       expect(projectContext).toContain("## Glossary");
       expect(projectContext).toContain("## Provenance & Manifest");
       expect(projectContext.length).toBeLessThanOrEqual(10_000);
+
+      const store = GraphStore.open(repoRoot);
+      try {
+        const readmeExcerpt = store.listExcerpts().find((excerpt) => excerpt.provenance.path === "README.md");
+        expect(readmeExcerpt?.provenance).toMatchObject({
+          adapter: "git",
+          path: "README.md",
+          start_line: 1,
+        });
+        expect(readmeExcerpt?.provenance.ingested_at).toEqual(expect.any(String));
+      } finally {
+        store.close();
+      }
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }

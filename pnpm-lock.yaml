@@ -20,9 +20,12 @@ importers:
 
   packages/adapters-git:
     dependencies:
-      fast-glob:
-        specifier: ^3.3.3
-        version: 3.3.3
+      '@latticeag/axicontext-core':
+        specifier: workspace:*
+        version: link:../core
+      '@latticeag/axicontext-parsers':
+        specifier: workspace:*
+        version: link:../parsers
 
   packages/cli:
     dependencies:
