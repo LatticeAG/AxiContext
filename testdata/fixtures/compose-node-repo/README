@@ -1,0 +1,3 @@
+# Compose Node Fixture
+
+Small Node.js project with a PostgreSQL compose service for parser and service detection tests.

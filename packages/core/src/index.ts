@@ -9,5 +9,6 @@ export * from "./init.js";
 export { runSync } from "./sync.js";
 export { generateProjectContext } from "./project-context.js";
 export { GraphStore } from "./graphStore.js";
+export type { Edge, Excerpt, GraphSlice, Node } from "./graph-types.js";
 export { exportJsonSchemas } from "./graph-types.js";
 export { applyPolicy, redactText } from "./policy.js";

@@ -1,0 +1,12 @@
+[project]
+name = "minimal-python-repo"
+version = "0.1.0"
+description = "Minimal Python fixture for AxiContext parser tests."
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32.0",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"

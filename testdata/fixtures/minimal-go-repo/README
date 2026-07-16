@@ -1,0 +1,3 @@
+# Minimal Go Fixture
+
+Small Go module used by AxiContext parser and sync tests.
