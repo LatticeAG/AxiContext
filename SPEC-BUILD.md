@@ -596,4 +596,6 @@ Performance budgets: SPEC.md §24 (best-effort; CI fails on functional tests onl
 |---------|------|-------|
 | 1.0.0-build | 2026-07-16 | Locked decisions; phased build contract for AxiContext + AxiFence |
 
-**Next action:** Implement Phase P0 following the checklist in order.
+**Next action:** Quality upgrades land via `SPEC-IMPROVE.md` on the build branch.
+
+See also: [`SPEC-IMPROVE.md`](./SPEC-IMPROVE.md).

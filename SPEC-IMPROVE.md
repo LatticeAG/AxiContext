@@ -110,14 +110,14 @@
 
 ## 5. Implementation checklist
 
-- [ ] I1 Query ranking + hints + human CLI output
-- [ ] I2 Global repo-root on all CLI commands + status human view + sync duration_ms
-- [ ] I3 PROJECT_CONTEXT heuristics (storage, ADR, glossary)
-- [ ] I4 Server healthz version/hash + error shape + debug log flag
-- [ ] I5 Policy secret fixture test
-- [ ] I6 Parsers runtime files + packageManager + digest portability test
-- [ ] I7 Fence env_keys, ports, overwrite refuse, secret fixture, badge label
-- [ ] I8 SDK in-process slice + clear unsynced errors
+- [x] I1 Query ranking + hints + human CLI output
+- [x] I2 Global repo-root on all CLI commands + status human view + sync duration_ms
+- [x] I3 PROJECT_CONTEXT heuristics (storage, ADR, glossary)
+- [x] I4 Server healthz version/hash + error shape + debug log flag
+- [x] I5 Policy secret fixture test
+- [x] I6 Parsers runtime files + packageManager + digest portability test
+- [x] I7 Fence env_keys, ports, overwrite refuse, secret fixture, badge label
+- [x] I8 SDK in-process slice + clear unsynced errors
 - [x] I9 Golden headings test + e2e-cli + fence compose test
 - [x] I10 README/docs/CHANGELOG + CI pnpm cache
 
