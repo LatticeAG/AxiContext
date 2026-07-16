@@ -1,8 +1,10 @@
 # OSS production readiness plan — AxiContext + AxiFence
 
-**Status:** Planning only. Do not implement until this plan is accepted.  
-**Date:** 2026-07-16  
-**Scope:** Make AxiContext shippable as OSS v0.1, and specify AxiFence so it can share parsers without inheriting M1 debt.
+> **Build now:** use [`SPEC-BUILD.md`](./SPEC-BUILD.md) (phased checklist) and [`SPEC-AxiFence.md`](./SPEC-AxiFence.md). This file is the gap analysis that led to those locks.
+
+**Status:** SUPERSEDED for build execution — follow `SPEC-BUILD.md`  
+**Date:** 2026-07-16 (decisions locked same day)  
+**Scope:** Historical gap analysis. Build authority is `SPEC-BUILD.md` + `SPEC-AxiFence.md`.
 
 ---
 
@@ -313,16 +315,21 @@ P2  B  GitHub adapter, SDK, SARIF, MCP, extra fixtures
 
 ---
 
-## Open decisions to confirm before build
+## Open decisions — LOCKED
 
-| # | Decision | Recommendation |
-|---|----------|----------------|
-| 1 | Ship npm when M1 (A1–A10) is green, before GitHub Issues? | **Yes** (matches SPEC M2 split) |
-| 2 | Same monorepo for Fence? | **Yes** initially, separate packages |
-| 3 | Extract parsers before or after first npm? | **After** first npm if it delays AxiContext; ideally land parsers in the same release train as soon as sync is SQLite-backed |
-| 4 | Fence LLM fallback in v1? | **No** — rules only |
-| 5 | Keep emoji-heavy README? | **Tone down** for OSS seriousness; optional later |
-| 6 | Package name for Fence | `@latticeag/axi-fence`, bin `axi-fence` |
+All choices recorded in `SPEC-BUILD.md` §0. Summary:
+
+| # | Choice |
+|---|--------|
+| 1 | npm after AxiContext M1 (Phases P0–P3); GitHub Issues in M2 |
+| 2 | Fence in this monorepo as sibling packages |
+| 3 | Extract parsers **during** M1 (Phase P0), before Fence code |
+| 4 | Fence v0.1 rules only — no LLM |
+| 5 | Professional README — no decorative heading emoji |
+| 6 | `@latticeag/axi-fence`, bin `axi-fence` |
+| 7 | Thin real SDK (`fromRepo` + `connect`) in v0.1.0 |
+| 8 | SARIF drift in v0.1.0 |
+| 9 | MCP deferred to v0.2 |
 
 ---
 
@@ -344,4 +351,4 @@ Until 1–6 are true, treat the repo as pre-release scaffold, not production OSS
 
 ## Next step
 
-Review and lock the open decisions above. On approval, implement Workstream A in dependency order on a feature branch, with tests green before touching Fence.
+**Build from `SPEC-BUILD.md`.** Start Phase P0 (cleanup + parsers) on an implementation branch. This plan remains as the gap-analysis rationale.

@@ -5,10 +5,11 @@
 **Scope (locked):** **OSS Phase 1 only** — MIT CLI, SDK, local graph, adapters, Agent Read API  
 **SaaS / hosted sync:** Deferred to Phase 2 (see Appendix F)  
 **License:** MIT  
-**Status:** In active OSS implementation (scaffold landed; consolidation in progress)  
+**Status:** Product bible — implementation order locked in `SPEC-BUILD.md`  
 **Spec version:** 1.0.0-oss-draft  
 **Repo:** `github.com/LatticeAG/AxiContext`  
-**Last updated:** 2026-07-11
+**Last updated:** 2026-07-16  
+**Build contract:** [`SPEC-BUILD.md`](./SPEC-BUILD.md) (phases P0–P4) · Fence: [`SPEC-AxiFence.md`](./SPEC-AxiFence.md)
 
 ---
 
@@ -1340,4 +1341,4 @@ OSS design constraints to preserve for future SaaS:
 | 0.2.0-draft | 2026-07-11 | Full hybrid planning spec |
 | 1.0.0-oss-draft | 2026-07-11 | **OSS scope lock**, implementation-grade detail, monorepo status, parallel build landed, SaaS deferred to Appendix F |
 
-**Next action:** Complete M1 consolidation → M2 npm release.
+**Next action:** Execute `SPEC-BUILD.md` phases P0→P3 for AxiContext v0.1.0, then P4 for AxiFence v0.1.0.
