@@ -5,3 +5,5 @@ packages:
   - "packages/sdk"
   - "packages/server"
   - "packages/adapters-git"
+  - "packages/fence-core"
+  - "packages/fence"
