@@ -34,6 +34,17 @@ export interface ContextExcerpt {
   source_type: "code" | "docs" | "manifest" | "unknown";
   text: string;
   tokens: number;
+  start_line?: number;
+  end_line?: number;
+  provenance?: {
+    adapter: string;
+    path?: string;
+    start_line?: number;
+    end_line?: number;
+    commit?: string;
+    url?: string;
+    ingested_at: string;
+  };
 }
 
 export interface ContextNode {
@@ -55,12 +66,9 @@ export interface ContextSummary {
 }
 
 export interface ContextPage {
-  summary: ContextSummary;
-  page: {
-    cursor: string | null;
-    next_cursor: string | null;
-    limit: number;
-  };
+  manifest: Manifest;
+  nodes: ContextNode[];
+  next_cursor: string | null;
 }
 
 export interface SliceRequest {
@@ -77,22 +85,25 @@ export interface QueryRequest {
 
 export interface QueryResult {
   question: string;
-  max_tokens: number;
-  include: string[];
   answer_context: ContextExcerpt[];
-  nodes: ContextNode[];
+  tokens_used: number;
   manifest_version: string;
+  warning?: string;
 }
 
 export interface DriftChange {
   kind:
     | "manifest.missing"
     | "manifest.schema_mismatch"
-    | "file_tree.digest_changed"
+    | "adapter.digest.changed"
+    | "content_hash.changed"
+    | "file_tree.changed"
     | "readme.changed"
+    | "dependencies.changed"
     | "dependency.added"
-    | "dependency.digest_changed"
-    | "auth_paths.changed";
+    | "dependency.removed"
+    | "auth_paths.changed"
+    | "project_context_hash.changed";
   severity: DriftSeverity;
   detail: string;
   path?: string;

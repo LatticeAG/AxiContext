@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createAxiContextApp } from "@latticeag/axicontext-server";
+import { DEFAULT_CONFIG_TOML, GraphStore } from "@latticeag/axicontext-core";
+import { createAxiContextApp, startAxiContextServer } from "@latticeag/axicontext-server";
 
 const tmpDirs: string[] = [];
 
@@ -31,25 +32,43 @@ async function makeRepoFixture(): Promise<string> {
     ),
     "utf8"
   );
+  await writeFile(path.join(repoPath, ".axicontext", "config.toml"), DEFAULT_CONFIG_TOML, "utf8");
 
-  await writeFile(
-    path.join(repoPath, ".axicontext", "manifest.json"),
-    `${JSON.stringify(
-      {
-        schema_version: "1.0.0",
-        generated_at: "2026-07-11T00:00:00.000Z",
-        adapters: {
-          git: { digest: "sha256:any" },
-          readme: { digest: "sha256:any" },
-          dependencies: { direct: ["jose"] },
-          auth_paths: { paths: ["src/auth/login.ts"] }
-        }
-      },
-      null,
-      2
-    )}\n`,
-    "utf8"
-  );
+  const store = GraphStore.open(repoPath);
+  store.upsertNode({
+    id: "project:fixture",
+    type: "project",
+    data: { name: "fixture" }
+  });
+  store.upsertNode({
+    id: "file:src/auth/login.ts",
+    type: "file",
+    data: { path: "src/auth/login.ts", role: "important" }
+  });
+  store.upsertEdge({
+    id: "edge:project-login",
+    from_id: "project:fixture",
+    to_id: "file:src/auth/login.ts",
+    type: "contains",
+    data: {}
+  });
+  store.addExcerpt({
+    text: "OAuth details live in src/auth/login.ts.",
+    provenance: {
+      adapter: "git",
+      path: "src/auth/login.ts",
+      start_line: 1,
+      end_line: 1,
+      ingested_at: "2026-07-11T00:00:00.000Z"
+    }
+  });
+  store.writeManifest({
+    git: {
+      digest: "sha256:any",
+      stats: { files_considered: 1 }
+    }
+  });
+  store.close();
 
   return repoPath;
 }
@@ -72,14 +91,32 @@ describe("Agent Read API routes", () => {
 
     const manifest = await app.request("/v1/manifest");
     expect(manifest.status).toBe(200);
+    const etag = manifest.headers.get("etag");
+    expect(etag).toMatch(/^"sha256:/);
     const manifestJson = await manifest.json();
     expect(manifestJson.schema_version).toBe("1.0.0");
+
+    const cachedManifest = await app.request("/v1/manifest", {
+      headers: {
+        "if-none-match": etag ?? ""
+      }
+    });
+    expect(cachedManifest.status).toBe(304);
 
     const context = await app.request("/v1/context?limit=1");
     expect(context.status).toBe(200);
     const contextJson = await context.json();
-    expect(Array.isArray(contextJson.summary.excerpts)).toBe(true);
-    expect(contextJson.summary.excerpts.length).toBeLessThanOrEqual(1);
+    expect(contextJson.manifest.schema_version).toBe("1.0.0");
+    expect(Array.isArray(contextJson.nodes)).toBe(true);
+    expect(contextJson.nodes.length).toBeLessThanOrEqual(1);
+    expect(contextJson.next_cursor).toBe("1");
+
+    const cachedContext = await app.request("/v1/context", {
+      headers: {
+        "if-none-match": etag ?? ""
+      }
+    });
+    expect(cachedContext.status).toBe(304);
 
     const slice = await app.request("/v1/context/slice?topic=auth&depth=2&max_tokens=2000");
     expect(slice.status).toBe(200);
@@ -92,13 +129,15 @@ describe("Agent Read API routes", () => {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        question: "Where is authentication handled?",
+        question: "Where are OAuth details?",
         max_tokens: 1200
       })
     });
     expect(query.status).toBe(200);
     const queryJson = await query.json();
     expect(Array.isArray(queryJson.answer_context)).toBe(true);
+    expect(queryJson.tokens_used).toBeGreaterThan(0);
+    expect(queryJson.answer_context[0]?.provenance.path).toBe("src/auth/login.ts");
 
     const drift = await app.request("/v1/drift");
     expect(drift.status).toBe(200);
@@ -109,6 +148,7 @@ describe("Agent Read API routes", () => {
     expect(openApi.status).toBe(200);
     const openApiJson = await openApi.json();
     expect(openApiJson.paths["/v1/context/query"]).toBeDefined();
+    expect(openApiJson.components.securitySchemes.bearerAuth).toBeDefined();
   });
 
   it("enforces api token when configured", async () => {
@@ -129,5 +169,36 @@ describe("Agent Read API routes", () => {
       }
     });
     expect(authorized.status).toBe(200);
+  });
+
+  it("returns 404 for missing manifests", async () => {
+    const repoPath = await mkdtemp(path.join(os.tmpdir(), "axictx-server-missing-"));
+    tmpDirs.push(repoPath);
+    await mkdir(path.join(repoPath, ".axicontext"), { recursive: true });
+    const app = createAxiContextApp({
+      repoPath,
+      host: "127.0.0.1",
+      port: 8787
+    });
+
+    const manifest = await app.request("/v1/manifest");
+    expect(manifest.status).toBe(404);
+    await expect(manifest.json()).resolves.toEqual({
+      error: "manifest_missing",
+      hint: "run axictx sync"
+    });
+  });
+
+  it("refuses to start on a non-loopback host without a token", async () => {
+    const repoPath = await makeRepoFixture();
+
+    await expect(
+      startAxiContextServer({
+        repoPath,
+        host: "0.0.0.0",
+        port: 8787,
+        apiToken: ""
+      })
+    ).rejects.toThrow("Refusing to start without an API token");
   });
 });
