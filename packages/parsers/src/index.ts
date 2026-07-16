@@ -88,6 +88,7 @@ export interface TreeFact {
 export interface RuntimeHints {
   node_versions: string[];
   python_versions: string[];
+  rust_versions: string[];
   rust_editions: string[];
   go_versions: string[];
   docker_base_images: string[];
@@ -137,6 +138,13 @@ export interface RepoAnalysis {
 }
 
 type RepoAnalysisWithoutDigest = Omit<RepoAnalysis, "digest">;
+
+interface RuntimeFileHints {
+  node_versions: string[];
+  python_versions: string[];
+  rust_versions: string[];
+  go_versions: string[];
+}
 
 const ANALYSIS_SCHEMA_VERSION = "1.0.0";
 
@@ -260,7 +268,8 @@ export async function analyzeRepo(root: string, opts?: AnalyzeOptions): Promise<
   const tree = await buildTreeFact(resolvedRoot, allFiles);
   const ecosystems = inferEcosystems(manifests);
   const packageManager = inferPackageManager({ manifests, lockfiles, fileSet });
-  const runtimeHints = buildRuntimeHints({ manifests, dockerfiles, packageManager });
+  const runtimeFileHints = await parseRuntimeFiles(resolvedRoot, allFiles, warnings);
+  const runtimeHints = buildRuntimeHints({ manifests, dockerfiles, packageManager, runtimeFileHints });
   const services = inferServices({ manifests, composeFiles });
   const scripts = collectScripts({ manifests, makefiles, justfiles });
 
@@ -738,27 +747,127 @@ function inferPackageManager(input: {
 }
 
 function parseNodePackageManager(packageManager: string): PackageManager | undefined {
-  const name = packageManager.split("@")[0];
+  const name = packageManager.trim().split("@")[0];
   if (name === "pnpm" || name === "npm" || name === "yarn" || name === "bun") {
     return name;
   }
   return undefined;
 }
 
+async function parseRuntimeFiles(root: string, files: string[], warnings: string[]): Promise<RuntimeFileHints> {
+  const hints: RuntimeFileHints = {
+    node_versions: [],
+    python_versions: [],
+    rust_versions: [],
+    go_versions: [],
+  };
+
+  for (const filePath of files.filter(isRuntimeVersionPath)) {
+    try {
+      const text = await readText(root, filePath);
+      const baseName = path.basename(filePath);
+      if (baseName === ".nvmrc" || baseName === ".node-version") {
+        hints.node_versions.push(...parseVersionFile(text));
+        continue;
+      }
+      if (baseName === ".python-version") {
+        hints.python_versions.push(...parseVersionFile(text));
+        continue;
+      }
+      addToolVersions(hints, text);
+    } catch (error) {
+      warnings.push(`${filePath}: ${errorMessage(error)}`);
+    }
+  }
+
+  return {
+    node_versions: uniqueSorted(hints.node_versions),
+    python_versions: uniqueSorted(hints.python_versions),
+    rust_versions: uniqueSorted(hints.rust_versions),
+    go_versions: uniqueSorted(hints.go_versions),
+  };
+}
+
+function isRuntimeVersionPath(filePath: string): boolean {
+  const baseName = path.basename(filePath);
+  return baseName === ".nvmrc" || baseName === ".node-version" || baseName === ".python-version" || baseName === ".tool-versions";
+}
+
+function parseVersionFile(text: string): string[] {
+  for (const line of text.split("\n")) {
+    const value = meaningfulRuntimeLine(line);
+    if (value !== undefined) {
+      return [value];
+    }
+  }
+  return [];
+}
+
+function addToolVersions(hints: RuntimeFileHints, text: string): void {
+  for (const line of text.split("\n")) {
+    const value = meaningfulRuntimeLine(line);
+    if (value === undefined) {
+      continue;
+    }
+    const [tool, ...versions] = value.split(/\s+/);
+    const normalizedVersions = versions.filter((version) => version.length > 0 && version !== "system");
+    if (tool === undefined || normalizedVersions.length === 0) {
+      continue;
+    }
+    const normalizedTool = tool.toLowerCase();
+    if (normalizedTool === "nodejs" || normalizedTool === "node") {
+      hints.node_versions.push(...normalizedVersions);
+      continue;
+    }
+    if (normalizedTool === "python") {
+      hints.python_versions.push(...normalizedVersions);
+      continue;
+    }
+    if (normalizedTool === "rust") {
+      hints.rust_versions.push(...normalizedVersions);
+      continue;
+    }
+    if (normalizedTool === "golang" || normalizedTool === "go") {
+      hints.go_versions.push(...normalizedVersions);
+    }
+  }
+}
+
+function meaningfulRuntimeLine(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("#")) {
+    return undefined;
+  }
+  const uncommented = trimmed.replace(/\s+#.*$/, "").trim();
+  return uncommented.length > 0 ? uncommented : undefined;
+}
+
 function buildRuntimeHints(input: {
   manifests: ManifestFact[];
   dockerfiles: DockerfileFact[];
   packageManager?: PackageManager;
+  runtimeFileHints: RuntimeFileHints;
 }): RuntimeHints {
-  const nodeVersions = uniqueSorted(input.manifests.flatMap((manifest) => (manifest.engines?.node !== undefined ? [manifest.engines.node] : [])));
-  const pythonVersions = uniqueSorted(input.manifests.flatMap((manifest) => (manifest.requires_python !== undefined ? [manifest.requires_python] : [])));
+  const nodeVersions = uniqueSorted([
+    ...input.runtimeFileHints.node_versions,
+    ...input.manifests.flatMap((manifest) => (manifest.engines?.node !== undefined ? [manifest.engines.node] : [])),
+  ]);
+  const pythonVersions = uniqueSorted([
+    ...input.runtimeFileHints.python_versions,
+    ...input.manifests.flatMap((manifest) => (manifest.requires_python !== undefined ? [manifest.requires_python] : [])),
+  ]);
+  const rustVersions = input.runtimeFileHints.rust_versions;
   const rustEditions = uniqueSorted(input.manifests.flatMap((manifest) => (manifest.edition !== undefined ? [manifest.edition] : [])));
-  const goVersions = uniqueSorted(input.manifests.flatMap((manifest) => (manifest.go_version !== undefined ? [manifest.go_version] : [])));
+  const goVersions = uniqueSorted([
+    ...input.runtimeFileHints.go_versions,
+    ...input.manifests.flatMap((manifest) => (manifest.go_version !== undefined ? [manifest.go_version] : [])),
+  ]);
   const dockerBaseImages = uniqueSorted(input.dockerfiles.flatMap((dockerfile) => dockerfile.base_images));
   const exposedPorts = uniqueNumbers(input.dockerfiles.flatMap((dockerfile) => dockerfile.exposed_ports));
   return {
     node_versions: nodeVersions,
     python_versions: pythonVersions,
+    rust_versions: rustVersions,
     rust_editions: rustEditions,
     go_versions: goVersions,
     docker_base_images: dockerBaseImages,

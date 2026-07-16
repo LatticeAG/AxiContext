@@ -98,6 +98,14 @@ export function generateBootstrap(plan: SetupPlan): string {
     lines.push("");
   }
 
+  if (plan.services.length > 0) {
+    lines.push("# Dev Containers starts compose services before this script runs.");
+    if (plan.services.some((service) => service.name.toLowerCase().includes("postgres") || service.image.toLowerCase().includes("postgres"))) {
+      lines.push("# Postgres may need a few seconds before migration commands accept connections.");
+    }
+    lines.push("");
+  }
+
   for (const command of plan.install_commands) {
     lines.push(command);
   }
@@ -119,6 +127,13 @@ export function generateReadmeSetup(plan: SetupPlan, version: string): string {
     plan.post_create_commands.length > 0 ? plan.post_create_commands : ["No post-create commands inferred."];
   const ports = plan.forward_ports.length > 0 ? plan.forward_ports.map((port) => `- ${port}`) : ["- No forwarded ports inferred."];
   const envKeys = plan.env_keys.length > 0 ? plan.env_keys.map((key) => `- ${key}`) : ["- No env keys inferred."];
+  const services =
+    plan.services.length > 0
+      ? plan.services.map((service) => `- ${service.name} (${service.image}) on port ${service.port}`)
+      : ["- No compose services inferred."];
+  const serviceNotes = plan.services.some((service) => service.name.toLowerCase().includes("postgres") || service.image.toLowerCase().includes("postgres"))
+    ? ["", "Postgres can take a few seconds to accept connections. Rerun migration commands if the first attempt starts too early."]
+    : [];
 
   return [
     `<!-- axi-fence:generated digest=${plan.digest} -->`,
@@ -142,6 +157,11 @@ export function generateReadmeSetup(plan: SetupPlan, version: string): string {
     "## Ports",
     "",
     ...ports,
+    "",
+    "## Services",
+    "",
+    ...services,
+    ...serviceNotes,
     "",
     "## Env keys to fill",
     "",

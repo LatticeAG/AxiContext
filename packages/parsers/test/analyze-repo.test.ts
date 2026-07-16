@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { analyzeRepo } from "../src/index.js";
@@ -35,6 +35,70 @@ describe("analyzeRepo", () => {
     expect(first.important_files.map((file) => file.path)).toEqual(
       expect.arrayContaining(["CODEOWNERS", "LICENSE", "SECURITY.md", "docs/README.md", "src/auth/session.ts"]),
     );
+  });
+
+  it("keeps the digest stable when repository contents move to another root", async () => {
+    const fixture = path.join(repoRoot, "testdata/fixtures/minimal-node-repo");
+    const copiedRoot = await mkdtemp(path.join(tmpdir(), "axicontext-parsers-copy-"));
+
+    try {
+      await cp(fixture, copiedRoot, { recursive: true });
+
+      const fixtureAnalysis = await analyzeRepo(await realpath(fixture));
+      const copiedAnalysis = await analyzeRepo(copiedRoot);
+
+      expect(copiedAnalysis.root).not.toBe(fixtureAnalysis.root);
+      expect(copiedAnalysis.digest).toBe(fixtureAnalysis.digest);
+      expect(copiedAnalysis.tree.digest).toBe(fixtureAnalysis.tree.digest);
+    } finally {
+      await rm(copiedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("detects runtime version files and packageManager when no lockfile is present", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "axicontext-parsers-runtime-"));
+
+    try {
+      await writeFile(
+        path.join(tempRoot, "package.json"),
+        JSON.stringify({ name: "runtime-hints", packageManager: "pnpm@9.15.0" }, null, 2),
+      );
+      await writeFile(path.join(tempRoot, ".nvmrc"), "v20.11.1\n");
+      await writeFile(path.join(tempRoot, ".node-version"), "22.5.1\n");
+      await writeFile(path.join(tempRoot, ".python-version"), "3.12.3\n");
+      await writeFile(path.join(tempRoot, ".tool-versions"), "nodejs 21.7.0\npython 3.11.9\ngolang 1.22.4\nrust 1.78.0\n");
+
+      const analysis = await analyzeRepo(tempRoot);
+
+      expect(analysis.package_manager).toBe("pnpm");
+      expect(analysis.runtime_hints.node_versions).toEqual(["21.7.0", "22.5.1", "v20.11.1"]);
+      expect(analysis.runtime_hints.python_versions).toEqual(["3.11.9", "3.12.3"]);
+      expect(analysis.runtime_hints.go_versions).toEqual(["1.22.4"]);
+      expect(analysis.runtime_hints.rust_versions).toEqual(["1.78.0"]);
+      expect(analysis.runtime_hints.package_manager).toBe("pnpm");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("lets lockfiles win over packageManager", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "axicontext-parsers-package-manager-"));
+
+    try {
+      await writeFile(
+        path.join(tempRoot, "package.json"),
+        JSON.stringify({ name: "lockfile-wins", packageManager: "pnpm@9.15.0" }, null, 2),
+      );
+      await writeFile(path.join(tempRoot, "package-lock.json"), "{}\n");
+
+      const analysis = await analyzeRepo(tempRoot);
+
+      expect(analysis.manifests[0]?.package_manager).toBe("pnpm@9.15.0");
+      expect(analysis.package_manager).toBe("npm");
+      expect(analysis.runtime_hints.package_manager).toBe("npm");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("parses pyproject.toml facts and dependency service hints", async () => {

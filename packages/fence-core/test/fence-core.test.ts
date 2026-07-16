@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { analyzeRepo } from "@latticeag/axicontext-parsers";
 
 import {
   generateBootstrap,
@@ -9,6 +14,9 @@ import {
   scoreCheck,
   type RepoAnalysis,
 } from "../src/index.js";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(testDir, "../../..");
 
 describe("axi-fence-core", () => {
   it("infers node setup from lockfiles, engines, scripts, env keys, and dependencies", () => {
@@ -57,6 +65,33 @@ describe("axi-fence-core", () => {
     expect(plan.digest).toMatch(/^sha256:/);
   });
 
+  it("infers common app ports from dependencies and scripts", () => {
+    const analysis = mockAnalysis({
+      ecosystems: ["node"],
+      manifests: [
+        {
+          path: "package.json",
+          ecosystem: "node",
+          kind: "package.json",
+          name: "web",
+          dependencies: [{ name: "express", version: "^4.18.0", kind: "dependency" }],
+          scripts: {
+            dev: "vite --host 0.0.0.0",
+            start: "node server.js",
+          },
+        },
+      ],
+      scripts: [
+        { name: "dev", source: "package.json", path: "package.json", command: "vite --host 0.0.0.0" },
+        { name: "start", source: "package.json", path: "package.json", command: "node server.js" },
+      ],
+    });
+
+    const plan = inferSetupPlan(analysis);
+
+    expect(plan.forward_ports).toEqual([3000, 5173]);
+  });
+
   it("generates stable artifacts without secret values", () => {
     const analysis = mockAnalysis({
       ecosystems: ["node"],
@@ -88,6 +123,34 @@ describe("axi-fence-core", () => {
     const readme = generateReadmeSetup(plan, "0.1.0");
     expect(readme).toContain(plan.digest);
     expect(readme).toContain("axi-fence version");
+  });
+
+  it("uses env example keys without copying .env secrets and documents postgres", async () => {
+    const fixture = path.join(repoRoot, "testdata/fixtures/compose-node-repo");
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "axi-fence-core-compose-"));
+
+    try {
+      await cp(fixture, tempRoot, { recursive: true });
+      await writeFile(path.join(tempRoot, ".env"), "SECRET=supersecret\nDATABASE_URL=postgres://supersecret@example.invalid/app\n");
+      await writeFile(path.join(tempRoot, ".env.example"), "SECRET=\nDATABASE_URL=\n");
+
+      const analysis = await analyzeRepo(tempRoot);
+      const plan = inferSetupPlan(analysis);
+      const generated = [
+        generateDevcontainer(plan),
+        generateComposeOverlay(plan) ?? "",
+        generateBootstrap(plan),
+        generateReadmeSetup(plan, "0.1.0"),
+      ].join("\n");
+
+      expect(plan.env_keys).toEqual(["DATABASE_URL", "SECRET"]);
+      expect(generateReadmeSetup(plan, "0.1.0")).toContain("SECRET");
+      expect(generated).toMatch(/postgres/i);
+      expect(generated).toMatch(/few seconds/i);
+      expect(generated).not.toContain("supersecret");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("scores blockers, warnings, and info from locked scoring rules", () => {
@@ -156,6 +219,7 @@ function mockAnalysis(overrides: Partial<RepoAnalysis> = {}): RepoAnalysis {
     runtime_hints: {
       node_versions: [],
       python_versions: [],
+      rust_versions: [],
       rust_editions: [],
       go_versions: [],
       docker_base_images: [],
