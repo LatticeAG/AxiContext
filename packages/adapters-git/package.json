@@ -2,6 +2,14 @@
   "name": "@latticeag/axicontext-adapter-git",
   "version": "0.1.0",
   "description": "Git source adapter for AxiContext sync ingestion",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LatticeAG/AxiContext.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

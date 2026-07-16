@@ -2,6 +2,14 @@
   "name": "@latticeag/axicontext-core",
   "version": "0.1.0",
   "description": "AxiContext core types, config, and scaffolding.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LatticeAG/AxiContext.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

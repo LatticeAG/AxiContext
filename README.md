@@ -1,162 +1,160 @@
-# AxiContext 🧠
+# AxiContext
 
-<p align="center">
-  <a href="https://github.com/LatticeAG/AxiContext/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/LatticeAG/AxiContext?style=for-the-badge" alt="License" />
-  </a>
-  <a href="https://github.com/LatticeAG/AxiContext">
-    <img src="https://img.shields.io/badge/TypeScript-5.7%2B-blue?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  </a>
-  <a href="https://github.com/LatticeAG/AxiContext/stargazers">
-    <img src="https://img.shields.io/github/stars/LatticeAG/AxiContext?style=for-the-badge" alt="GitHub stars" />
-  </a>
-  <a href="https://github.com/LatticeAG/AxiContext/issues">
-    <img src="https://img.shields.io/github/issues/LatticeAG/AxiContext?style=for-the-badge" alt="GitHub issues" />
-  </a>
-  <a href="https://github.com/LatticeAG/AxiContext">
-    <img src="https://img.shields.io/github/languages/top/LatticeAG/AxiContext?style=for-the-badge" alt="Top language" />
-  </a>
-</p>
+AxiContext is an open source project context controller for AI coding agents.
 
-<p align="center">
-  <b>Project context controller for AI coding agents.</b><br/>
-  Local-first. Source-aware. Agent-native.
-</p>
+It reads a local repository, writes a reviewable `PROJECT_CONTEXT.md`, stores structured context in a SQLite graph under `.axicontext/`, and exposes a local Agent Read API for tools that prefer JSON over Markdown.
 
-<p align="center">
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#why-axicontext">Why AxiContext</a> ·
-  <a href="#how-it-works">How It Works</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#monorepo-layout">Layout</a> ·
-  <a href="#agent-integration">Agent Integration</a>
-</p>
+The goal is simple: give agents a truthful project memory that can be regenerated, reviewed, queried, and checked for drift. The OSS build does not phone home to LatticeAG.
 
----
+## Project specs
 
-AxiContext generates and maintains `PROJECT_CONTEXT.md`, a SQLite Context Graph under `.axicontext/`, and a local Agent Read API so agents query structured project memory with provenance -- instead of re-reading the entire repo every time.
+- [SPEC.md](./SPEC.md) defines AxiContext OSS behavior.
+- [SPEC-BUILD.md](./SPEC-BUILD.md) defines the build phases and package layout.
+- [SPEC-AxiFence.md](./SPEC-AxiFence.md) defines the AxiFence companion CLI.
 
-Built for AI coding agents that need to stay coherent across sessions without burning context on repeated file scans. OSS-first, MIT-licensed, zero external dependencies.
+## What works in this repository
 
-> **Scope:** OSS Phase 1 only. See [SPEC.md](./SPEC.md) for the full implementation specification.
+- `axictx init` creates `.axicontext/config.toml` and a starter `PROJECT_CONTEXT.md`.
+- `axictx sync` ingests local repo signals, writes `.axicontext/manifest.json`, creates the SQLite graph, and regenerates `PROJECT_CONTEXT.md`.
+- `axictx drift` compares the current repo against the saved manifest and can fail CI.
+- `axictx query` returns keyword-ranked context excerpts with provenance.
+- `axictx serve` starts the local HTTP Agent Read API, defaulting to `127.0.0.1:8787`.
+- `@latticeag/axicontext-sdk` provides a thin TypeScript client path for in-process and HTTP use.
 
-## Why AxiContext
+AxiContext currently performs a full sync. Incremental sync, cloud sync, hosted dashboards, embeddings, and MCP are not claimed for v0.1. AxiFence is specified in this monorepo and is built as sibling packages in the later Fence phase.
 
-- **Eliminates redundant repo scanning** - agents re-read the same files every session. AxiContext caches structured project knowledge with provenance so agents start each session informed.
-- **Live drift detection** - the Context Graph knows the declared state vs actual filesystem state. `axictx drift` surfaces inconsistencies before they cause bugs.
-- **Agent-native query API** - local HTTP server at `127.0.0.1:8787` lets agents ask "what does the auth module do?" without parsing an entire `PROJECT_CONTEXT.md` string.
-- **Full-text search over context excerpts** - `axictx query "auth middleware"` returns ranked excerpts from the Graph, not grep hits on source files.
-- **Framework-agnostic** - integrates with Cursor, Claude Code, Copilot, or any agent that can read a file or hit an HTTP endpoint.
-- **Git-aware synchronization** - `axictx sync` ingests sources, updates the Graph, and regenerates `PROJECT_CONTEXT.md` in a single command. Git adapter means it understands your project's structure naturally.
+## Quickstart for users
 
-### How AxiContext is different
-
-- **Graph, not flat file** - a SQLite Context Graph preserves relationships between modules, APIs, tests, and configs. A flat `CONTEXT.md` loses the connections.
-- **Provenance-tracked** - every excerpt in the context store knows which file it came from, when it was last synced, and whether it's drifted. No stale context poisoning.
-- **Designed for agentic workflows** - the Agent Read API supports `topic` filtering and `max_tokens` budgeting, letting agents efficiently request exactly the context they need.
-
-## Quick Start
+Install from npm once packages are published:
 
 ```bash
+npm install -g @latticeag/axicontext
+```
+
+Or run the CLI without a global install:
+
+```bash
+npx @latticeag/axicontext init
+```
+
+Use it inside a repository:
+
+```bash
+cd your-repo
+axictx init
+axictx sync
+axictx drift
+axictx query "how does authentication work?" --json
+axictx serve
+```
+
+For CI:
+
+```bash
+axictx drift --ci --fail-on-drift
+```
+
+## Quickstart for contributors
+
+This repo uses Node.js 22 and pnpm.
+
+```bash
+corepack enable
 pnpm install
 pnpm build
+pnpm test
+pnpm typecheck
+```
 
-# In any git repository:
+Run the local CLI after build:
+
+```bash
 pnpm --filter @latticeag/axicontext start -- init
 pnpm --filter @latticeag/axicontext start -- sync
 pnpm --filter @latticeag/axicontext start -- drift
-pnpm --filter @latticeag/axicontext start -- serve
 ```
 
-### Commands
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `axictx init` | Scaffold `.axicontext/` directory |
-| `axictx doctor` | Validate setup and dependencies |
-| `axictx sync` | Ingest sources, build Graph, write `PROJECT_CONTEXT.md` |
-| `axictx drift` | Compare live state vs manifest |
-| `axictx query "..."` | FTS search over context excerpts |
-| `axictx serve` | Start `http://127.0.0.1:8787` Agent Read API |
-| `axictx status` | Manifest + Graph summary |
+| `axictx init` | Scaffold `.axicontext/config.toml` and `PROJECT_CONTEXT.md`. |
+| `axictx doctor` | Validate Node and local config. |
+| `axictx sync` | Run the local adapters, update the manifest, write the SQLite graph, and regenerate `PROJECT_CONTEXT.md`. |
+| `axictx drift` | Report context drift, with CI annotations when `--ci` is passed. |
+| `axictx query "..."` | Search generated context excerpts and return matching provenance. |
+| `axictx serve` | Start the loopback Agent Read API. |
+| `axictx status` | Print manifest and context summary data. |
 
-## How It Works
+## How it fits together
 
 ```mermaid
 flowchart LR
-  A[Git Repository] --> B[axictx sync]
-  B --> C[Git Source Adapter]
-  C --> D[Context Graph\nSQLite]
-  D --> E[PROJECT_CONTEXT.md]
-  D --> F[Agent Read API\n:8787]
-  G[Filesystem] --> H[axictx drift]
-  H --> D
-  I[Agent Query] --> F
+  Repo[Local repository] --> Sync[axictx sync]
+  Sync --> Adapter[Git adapter]
+  Adapter --> Graph[SQLite Context Graph]
+  Graph --> Context[PROJECT_CONTEXT.md]
+  Graph --> API[Agent Read API]
+  Repo --> Drift[axictx drift]
+  Drift --> Manifest[.axicontext/manifest.json]
+  Agent[Agent or editor] --> Context
+  Agent --> API
 ```
 
-## Features
+`PROJECT_CONTEXT.md` is for agents and editors that read files. The SQLite graph is the source for structured slices, query, and drift. The manifest records the generated state that CI can compare against later.
 
-### Core
+## Agent integration
 
-| Feature | Description |
-|---------|------------|
-| **Context Graph** | SQLite-backed graph preserving module relationships, API contracts, and config structure. |
-| **PROJECT_CONTEXT.md** | Auto-generated markdown summary for agents that prefer static file intake. |
-| **Drift Detection** | Compares Graph manifest against live filesystem, flags stale or missing entries. |
-| **Full-Text Search** | Ranked FTS5 search over all context excerpts. |
-| **Git Source Adapter** | Understands project structure from git metadata -- no manual config. |
-
-### Advanced
-
-| Feature | Description |
-|---------|------------|
-| **Agent Read API** | HTTP server with `topic` filtering and `max_tokens` budgeting for efficient agent queries. |
-| **Provenance Tracking** | Every excerpt knows its source file, sync timestamp, and drift status. |
-| **Incremental Sync** | Only re-processes changed files since last sync. |
-| **Zero Dependencies** | Self-contained SQLite-backed CLI. No Docker, no external services. |
-
-## Agent Integration
-
-Point Cursor or Claude Code at `PROJECT_CONTEXT.md`, or query the local API:
-
-```http
-GET http://127.0.0.1:8787/v1/context/slice?topic=authentication&max_tokens=2000
-```
-
-The API returns structured context slices with provenance metadata, letting your agent request exactly what it needs without drowning in irrelevant project details.
-
-## Monorepo Layout
-
-```text
-axicontext/
-├── packages/
-│   ├── axicontext/              # CLI (axictx)
-│   ├── axicontext-core/         # Graph, sync, drift, config
-│   ├── axicontext-server/       # Local Agent Read API (Hono)
-│   ├── axicontext-sdk/          # TypeScript SDK
-│   └── axicontext-adapter-git/  # Git source adapter
-├── testdata/
-│   └── fixtures/
-│       └── minimal-node-repo/   # Fixture for integration tests
-├── SPEC.md                      # Full implementation specification
-├── LICENSE                      # MIT
-└── README.md                    # This file
-```
-
-## Development
+Point an agent at `PROJECT_CONTEXT.md`, or query the local API:
 
 ```bash
-pnpm build
-pnpm test
+curl "http://127.0.0.1:8787/v1/context/slice?topic=authentication&max_tokens=2000"
 ```
 
-Fixture repo: `testdata/fixtures/minimal-node-repo/`
+For keyword query:
 
-## Known Issues
+```bash
+curl -X POST "http://127.0.0.1:8787/v1/context/query" \
+  -H "content-type: application/json" \
+  -d '{"question":"how does authentication work?","max_tokens":2000}'
+```
 
-- **Initial sync on large repos** - The first `axictx sync` on a monorepo with thousands of files can take 30-60s. Subsequent syncs are incremental and much faster.
-- **SQLite locking** - Concurrent `sync` and `serve` on the same Graph can cause SQLITE_BUSY. Avoid running both simultaneously against the same project.
+See [docs/agent-integration.md](./docs/agent-integration.md).
+
+## Monorepo layout
+
+```text
+/
+|-- packages/
+|   |-- cli/            # @latticeag/axicontext, bin axictx
+|   |-- core/           # config, sync, graph, drift, query
+|   |-- sdk/            # TypeScript SDK
+|   |-- server/         # local Agent Read API
+|   |-- adapters-git/   # Git and filesystem source adapter
+|   |-- parsers/        # shared repo analysis package, per SPEC-BUILD
+|   |-- fence-core/     # AxiFence inference core, per SPEC-AxiFence
+|   `-- fence/          # @latticeag/axi-fence CLI, per SPEC-AxiFence
+|-- docs/
+|-- testdata/
+|   `-- fixtures/
+|       `-- minimal-node-repo/
+|-- SPEC.md
+|-- SPEC-BUILD.md
+`-- SPEC-AxiFence.md
+```
+
+Some package directories in the target layout may be introduced by later phase work. `pnpm-workspace.yaml` tracks the intended workspace entries so package creation does not require another metadata pass.
+
+## Documentation
+
+- [Install](./docs/install.md)
+- [Config](./docs/config.md)
+- [Agent integration](./docs/agent-integration.md)
+- [CI](./docs/ci.md)
+- [AxiFence](./docs/fence.md)
+- [Security](./docs/security.md)
+- [Schema](./docs/schema.md)
 
 ## License
 
-MIT -- see [LICENSE](./LICENSE). Copyright &copy; 2026 LatticeAG.
+MIT. See [LICENSE](./LICENSE).
