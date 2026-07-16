@@ -48,6 +48,28 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
+  packages/parsers:
+    dependencies:
+      '@iarna/toml':
+        specifier: ^2.2.5
+        version: 2.2.5
+      fast-glob:
+        specifier: ^3.3.3
+        version: 3.3.3
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@24.13.3)
+
   packages/sdk:
     dependencies:
       '@latticeag/axicontext-core':

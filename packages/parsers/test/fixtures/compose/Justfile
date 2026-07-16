@@ -1,0 +1,5 @@
+bootstrap:
+  pnpm install
+
+check:
+  pnpm test
