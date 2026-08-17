@@ -31,6 +31,9 @@ jobs:
           cp -R testdata/fixtures/minimal-node-repo/. "$FIXTURE_COPY"/
           (
             cd "$FIXTURE_COPY"
+            git init -q .
+            git add -A
+            git -c user.email="ci@latticeag.dev" -c user.name="CI" commit -qm "seed fixture"
             node "$GITHUB_WORKSPACE/$BIN" init
             node "$GITHUB_WORKSPACE/$BIN" sync
             node "$GITHUB_WORKSPACE/$BIN" drift
