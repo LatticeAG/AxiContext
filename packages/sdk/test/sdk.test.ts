@@ -34,6 +34,15 @@ afterEach(async () => {
 });
 
 describe("AxiContext SDK", () => {
+  it("throws a clear error when local slices are requested before sync", async () => {
+    const repoRoot = await createFixtureRepo();
+    const context = await AxiContext.fromRepo(repoRoot);
+
+    await expect(context.slice({ topic: "README", maxTokens: 1_000 })).rejects.toThrow(
+      "Run axictx sync before requesting a context slice",
+    );
+  }, 20_000);
+
   it("runs local sync with the default git adapter", async () => {
     const repoRoot = await createFixtureRepo();
     const context = await AxiContext.fromRepo(repoRoot);

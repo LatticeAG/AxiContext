@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { analyzeRepo } from "@latticeag/axicontext-parsers";
 import {
@@ -21,14 +22,14 @@ import { Command, CommanderError } from "commander";
 const execFile = promisify(execFileCallback);
 const VERSION = "0.1.0";
 
-const enum ExitCode {
+export const enum ExitCode {
   Ok = 0,
   Error = 1,
   Config = 3,
   CloneFailure = 4,
 }
 
-class CliError extends Error {
+export class CliError extends Error {
   constructor(
     message: string,
     readonly exitCode: ExitCode,
@@ -56,7 +57,7 @@ interface CheckOptions {
   minScore: number;
 }
 
-interface RunOptions {
+export interface RunOptions {
   out?: string;
   overwrite: boolean;
   dryRun: boolean;
@@ -109,7 +110,11 @@ program
     process.exitCode = exitCode;
   });
 
-void program.parseAsync(process.argv).catch((error: unknown) => {
+if (isMainModule()) {
+  void program.parseAsync(process.argv).catch(handleCliError);
+}
+
+function handleCliError(error: unknown): never {
   if (error instanceof CommanderError) {
     process.stderr.write(`${error.message}\n`);
     process.exit(ExitCode.Config);
@@ -122,7 +127,7 @@ void program.parseAsync(process.argv).catch((error: unknown) => {
 
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(ExitCode.Error);
-});
+}
 
 async function runCheck(target: string, options: CheckOptions): Promise<ExitCode> {
   const resolved = await resolveTarget(target);
@@ -139,7 +144,7 @@ async function runCheck(target: string, options: CheckOptions): Promise<ExitCode
   }
 }
 
-async function runGenerate(target: string, options: RunOptions): Promise<ExitCode> {
+export async function runGenerate(target: string, options: RunOptions): Promise<ExitCode> {
   const resolved = await resolveTarget(target);
   try {
     if (resolved.mode === "url" && !options.out) {
@@ -374,19 +379,20 @@ function printDryRun(files: PlannedFile[]): void {
   }
 }
 
-function badgeForReport(report: CheckReport): {
+export function badgeForReport(report: CheckReport): {
   status: "pass" | "fail";
   score: number;
   label: string;
   color: string;
   markdown: string;
 } {
-  const color = report.status === "pass" ? "brightgreen" : "red";
-  const markdown = `[![AxiFence](https://img.shields.io/badge/AxiFence-${report.status}-${color})](https://github.com/LatticeAG/AxiContext)`;
+  const color = report.status === "pass" ? "green" : "red";
+  const label = `${report.status}-${report.score}`;
+  const markdown = `[![AxiFence ${report.score}](https://img.shields.io/badge/AxiFence-${label}-${color})](https://github.com/LatticeAG/AxiContext)`;
   return {
     status: report.status,
     score: report.score,
-    label: report.status,
+    label,
     color,
     markdown,
   };
@@ -394,4 +400,8 @@ function badgeForReport(report: CheckReport): {
 
 function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function isMainModule(): boolean {
+  return process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url;
 }

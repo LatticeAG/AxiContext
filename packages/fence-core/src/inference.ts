@@ -470,21 +470,38 @@ function inferForwardPorts(analysis: RepoAnalysis, services: SetupPlan["services
   }
 
   const dependencies = collectDependencyNames(analysis);
-  if (dependencies.has("next")) ports.add(3000);
-  if (dependencies.has("vite") || dependencies.has("@vitejs/plugin-react")) ports.add(5173);
-  if (scriptMentionsServer(analysis) && (dependencies.has("express") || dependencies.has("hono") || dependencies.has("fastify"))) {
+  const scriptCommands = collectScriptCommands(analysis);
+  if (dependencies.has("next") || scriptCommandMatches(scriptCommands, /\bnext\b/i)) ports.add(3000);
+  if (dependencies.has("vite") || dependencies.has("@vitejs/plugin-react") || scriptCommandMatches(scriptCommands, /\bvite\b/i)) ports.add(5173);
+  if (scriptMentionsServer(scriptCommands) && hasServerFrameworkSignal(dependencies, scriptCommands)) {
     ports.add(3000);
   }
 
   return [...ports].filter((port) => Number.isInteger(port) && port > 0).sort((left, right) => left - right);
 }
 
-function scriptMentionsServer(analysis: RepoAnalysis): boolean {
-  const commands = [
+function collectScriptCommands(analysis: RepoAnalysis): string[] {
+  return [
     ...analysis.scripts.map((script) => script.command ?? ""),
     ...analysis.manifests.flatMap((manifest) => Object.values(manifest.scripts ?? {})),
   ];
-  return commands.some((command) => /(dev|start|serve|node|tsx|ts-node)/i.test(command));
+}
+
+function scriptMentionsServer(commands: string[]): boolean {
+  return scriptCommandMatches(commands, /(dev|start|serve|node|tsx|ts-node)/i);
+}
+
+function hasServerFrameworkSignal(dependencies: Set<string>, commands: string[]): boolean {
+  return (
+    dependencies.has("express") ||
+    dependencies.has("hono") ||
+    dependencies.has("fastify") ||
+    scriptCommandMatches(commands, /\b(express|hono|fastify)\b/i)
+  );
+}
+
+function scriptCommandMatches(commands: string[], pattern: RegExp): boolean {
+  return commands.some((command) => pattern.test(command));
 }
 
 function inferEnvKeys(analysis: RepoAnalysis): string[] {

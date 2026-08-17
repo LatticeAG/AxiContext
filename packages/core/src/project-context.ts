@@ -30,6 +30,7 @@ export function generateProjectContext(input: ProjectContextInput): string {
   const ecosystems = uniqueStrings(moduleNodes.map((node) => stringData(node, "ecosystem")));
   const filePaths = uniqueStrings(fileNodes.map((node) => stringData(node, "path")));
   const depNames = uniqueStrings(depNodes.map((node) => stringData(node, "name")));
+  const readmeHeadings = readReadmeHeadings(input.repoRoot, filePaths);
   const manualBlocks = extractManualBlocks(input.existingContent ?? readExistingProjectContext(input));
 
   const sectionBodies: Array<[string, string[]]> = [
@@ -72,12 +73,9 @@ export function generateProjectContext(input: ProjectContextInput): string {
     ],
     [
       "Decisions (ADRs)",
-      decisionNodes.map((node) => {
-        const title = stringData(node, "title") ?? stringData(node, "path") ?? node.id;
-        return `- ${title}`;
-      }),
+      buildDecisions(decisionNodes, filePaths),
     ],
-    ["Glossary", buildGlossary(depNames, ecosystems)],
+    ["Glossary", buildGlossary(depNames, ecosystems, readmeHeadings)],
     ["Provenance & Manifest", buildProvenance(input, excerpts.length)],
   ];
 
@@ -119,6 +117,28 @@ function readExistingProjectContext(input: ProjectContextInput): string {
     return "";
   }
   return readFileSync(projectContextPath, "utf8");
+}
+
+function readReadmeHeadings(repoRoot: string, filePaths: string[]): string[] {
+  const readmePath =
+    filePaths.find((entry) => /^README(\.|$)/i.test(path.basename(entry)) && !entry.includes("/")) ??
+    filePaths.find((entry) => /^README(\.|$)/i.test(path.basename(entry)));
+  if (!readmePath) {
+    return [];
+  }
+
+  try {
+    const content = readFileSync(path.join(repoRoot, readmePath), "utf8");
+    const headings = content
+      .split(/\r?\n/)
+      .map((line) => /^##\s+(.+?)\s*$/.exec(line)?.[1]?.trim())
+      .filter((heading): heading is string => typeof heading === "string" && heading.length > 0)
+      .map((heading) => heading.replace(/\s+#+$/, "").trim())
+      .filter(Boolean);
+    return uniqueStrings(headings).slice(0, 12);
+  } catch {
+    return [];
+  }
 }
 
 function extractManualBlocks(content: string): string[] {
@@ -186,16 +206,45 @@ function buildAuthSecurity(filePaths: string[], nodes: Node[]): string[] {
 
 function buildDataStorage(depNames: string[], filePaths: string[]): string[] {
   const deps = new Set(depNames.map((value) => value.toLowerCase()));
+  const paths = filePaths.map((value) => value.toLowerCase());
   const lines: string[] = [];
-  for (const dep of ["prisma", "drizzle-orm", "better-sqlite3", "pg", "postgres", "redis", "ioredis"]) {
-    if (deps.has(dep)) {
+  const storageDeps = [
+    "prisma",
+    "@prisma/client",
+    "drizzle-orm",
+    "drizzle-kit",
+    "better-sqlite3",
+    "sqlite3",
+    "pg",
+    "postgres",
+    "redis",
+    "ioredis",
+    "mongodb",
+    "mongoose",
+  ];
+  for (const dep of storageDeps) {
+    if (deps.has(dep.toLowerCase())) {
       lines.push(`- Storage dependency: \`${dep}\``);
+    }
+  }
+  const storagePathSignals: Array<[RegExp, string]> = [
+    [/(\b|\/)prisma(\/|$)|schema\.prisma$/i, "Prisma schema/config path"],
+    [/(\b|\/)drizzle(\/|$)|drizzle\.config\./i, "Drizzle ORM path"],
+    [/sqlite|\.sqlite3?$|\.db$/i, "SQLite path"],
+    [/postgres|pgsql/i, "Postgres path"],
+    [/redis/i, "Redis path"],
+    [/mongo/i, "MongoDB path"],
+  ];
+  for (const [pattern, label] of storagePathSignals) {
+    const matched = paths.find((entry) => pattern.test(entry));
+    if (matched) {
+      lines.push(`- ${label}: \`${matched}\``);
     }
   }
   if (filePaths.some((entry) => /docker-compose.*\.ya?ml$/i.test(entry))) {
     lines.push("- Docker Compose file present, inspect it for local backing services.");
   }
-  return lines;
+  return uniqueStrings(lines);
 }
 
 function buildApisIntegrations(depNames: string[], filePaths: string[]): string[] {
@@ -230,10 +279,25 @@ function buildTooling(filePaths: string[], depNodes: Node[]): string[] {
   return lines;
 }
 
-function buildGlossary(depNames: string[], ecosystems: string[]): string[] {
+function buildDecisions(decisionNodes: Node[], filePaths: string[]): string[] {
+  const lines = decisionNodes.map((node) => {
+    const title = stringData(node, "title") ?? stringData(node, "path") ?? node.id;
+    return `- ${title}`;
+  });
+  const decisionPaths = filePaths.filter((entry) => {
+    return /(^|\/)docs\/adr\/|(^|\/)decisions\/|(^|\/)ADR[^/]*\.md$/i.test(entry);
+  });
+  lines.push(...decisionPaths.slice(0, 12).map((entry) => `- ADR path: \`${entry}\``));
+  return uniqueStrings(lines);
+}
+
+function buildGlossary(depNames: string[], ecosystems: string[], readmeHeadings: string[]): string[] {
   const lines: string[] = [];
   if (ecosystems.length > 0) {
     lines.push(`- Ecosystems: ${ecosystems.join(", ")}`);
+  }
+  for (const heading of readmeHeadings) {
+    lines.push(`- README heading: ${heading}`);
   }
   for (const dep of depNames.slice(0, 20)) {
     lines.push(`- \`${dep}\`: dependency`);

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added root e2e coverage for `axictx init`, `sync`, `drift`, and `query` on the minimal Node fixture.
+- Added a golden `PROJECT_CONTEXT.md` heading test backed by `testdata/expected/minimal-node-headings.txt`.
+- Added AxiFence compose coverage that verifies the generated overlay includes PostgreSQL for the compose fixture.
+- Updated README and Fence docs to cover both CLIs and their current flags.
+- Tightened CI pnpm cache configuration.
+
 ## 0.1.0
 
 Initial OSS release line for AxiContext.

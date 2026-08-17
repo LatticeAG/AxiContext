@@ -11,6 +11,8 @@ import {
   queryContext
 } from "@latticeag/axicontext-core";
 
+const AXICTX_VERSION = "0.1.0";
+
 export interface ServerOptions {
   repoPath?: string;
   host?: string;
@@ -152,6 +154,14 @@ function parseOptionalFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function errorResponse(error: string, code: string, hint?: string): { error: string; hint?: string; code: string } {
+  return {
+    error,
+    ...(hint ? { hint } : {}),
+    code
+  };
+}
+
 export function createAxiContextApp(options: {
   repoPath: string;
   host: string;
@@ -160,6 +170,15 @@ export function createAxiContextApp(options: {
 }) {
   const app = new Hono();
   const openApi = buildOpenApi(options.host, options.port);
+  const debugRequests = process.env.AXICTX_SERVE_DEBUG === "1";
+
+  app.use("*", async (c, next) => {
+    const startedAt = Date.now();
+    await next();
+    if (debugRequests) {
+      process.stderr.write(`${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - startedAt}ms\n`);
+    }
+  });
 
   app.use("/v1/*", async (c, next) => {
     if (!options.apiToken) {
@@ -174,9 +193,12 @@ export function createAxiContextApp(options: {
     await next();
   });
 
-  app.get("/healthz", (c) => {
+  app.get("/healthz", async (c) => {
+    const manifest = await loadManifest(options.repoPath);
     return c.json({
       status: "ok",
+      axictx_version: manifest?.axictx_version ?? AXICTX_VERSION,
+      ...(manifest?.content_hash ? { content_hash: manifest.content_hash } : {}),
       host: options.host,
       repo_path: options.repoPath
     });
@@ -185,7 +207,7 @@ export function createAxiContextApp(options: {
   app.get("/v1/manifest", async (c) => {
     const manifest = await loadManifest(options.repoPath);
     if (!manifest) {
-      return c.json({ error: "manifest_missing", hint: "run axictx sync" }, 404);
+      return c.json(errorResponse("manifest_missing", "manifest_missing", "run axictx sync"), 404);
     }
     if (manifest.content_hash) {
       const etag = etagValue(manifest.content_hash);
@@ -200,7 +222,7 @@ export function createAxiContextApp(options: {
   app.get("/v1/context", async (c) => {
     const manifest = await loadManifest(options.repoPath);
     if (!manifest) {
-      return c.json({ error: "manifest_missing", hint: "run axictx sync" }, 404);
+      return c.json(errorResponse("manifest_missing", "manifest_missing", "run axictx sync"), 404);
     }
     if (manifest.content_hash) {
       const etag = etagValue(manifest.content_hash);
@@ -250,11 +272,13 @@ export function createAxiContextApp(options: {
 
   app.get("/v1/openapi.json", (c) => c.json(openApi));
 
+  app.notFound((c) => c.json(errorResponse("not_found", "not_found"), 404));
+
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
-      return c.json({ error: err.message }, err.status);
+      return c.json(errorResponse(err.message, `http_${err.status}`), err.status);
     }
-    return c.json({ error: "internal_server_error", detail: String(err) }, 500);
+    return c.json(errorResponse("internal_server_error", "internal_server_error"), 500);
   });
 
   return app;

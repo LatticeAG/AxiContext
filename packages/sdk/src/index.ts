@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { GitSourceAdapter } from "@latticeag/axicontext-adapter-git";
 import {
   detectDrift,
@@ -242,7 +244,8 @@ function isQueryResult(value: unknown): value is QueryResult {
     value.answer_context.every(isContextExcerpt) &&
     typeof value.tokens_used === "number" &&
     typeof value.manifest_version === "string" &&
-    optionalString(value.warning)
+    optionalString(value.warning) &&
+    optionalString(value.hint)
   );
 }
 
@@ -319,6 +322,14 @@ function encodeOptionalNumber(params: URLSearchParams, key: string, value: numbe
   }
 }
 
+function ensureLocalRepoSynced(repoRoot: string): void {
+  const graphPath = path.join(repoRoot, ".axicontext", "graph", "graph.sqlite");
+  const manifestPath = path.join(repoRoot, ".axicontext", "manifest.json");
+  if (!existsSync(graphPath) || !existsSync(manifestPath)) {
+    throw new Error("AxiContext repository is not synced. Run axictx sync before requesting a context slice.");
+  }
+}
+
 export class AxiContext {
   private constructor(private readonly mode: ContextMode) {}
 
@@ -359,6 +370,7 @@ export class AxiContext {
 
   async slice(opts: { topic: string; depth?: number; maxTokens?: number }): Promise<GraphSlice> {
     if (this.mode.kind === "local") {
+      ensureLocalRepoSynced(this.mode.repoRoot);
       const store = GraphStore.open(this.mode.repoRoot);
       try {
         return store.getSlice(opts.topic, opts.depth, opts.maxTokens);
