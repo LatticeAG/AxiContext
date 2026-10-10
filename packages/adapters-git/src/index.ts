@@ -280,6 +280,17 @@ export class GitSourceAdapter implements SourceAdapter {
   }
 
   private async readCommits(repoRoot: string, maxCommits: number, warnings: string[]): Promise<CommitRecord[]> {
+    // A repo whose HEAD is unborn (zero commits) has no history to read — that
+    // is an empty result, not a failure worth warning about.
+    try {
+      await execFile("git", ["-C", repoRoot, "rev-parse", "--verify", "HEAD"]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        warnings.push(`Failed to read git commit history: ${toMessage(error)}`);
+      }
+      return [];
+    }
+
     try {
       const { stdout } = await execFile("git", [
         "-C",

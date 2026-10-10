@@ -38,7 +38,7 @@ The default base URL is:
 http://127.0.0.1:8787
 ```
 
-Health check:
+Health check (`/v1/health` is an equivalent alias under the v1 namespace):
 
 ```bash
 curl "http://127.0.0.1:8787/healthz"

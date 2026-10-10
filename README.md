@@ -25,17 +25,20 @@ AxiContext currently performs a full sync. Incremental sync, cloud sync, hosted 
 
 ## Quickstart for users
 
-Install from npm once packages are published:
+The packages are not published to npm yet, so install the CLI from source:
 
 ```bash
-npm install -g @latticeag/axicontext
+git clone https://github.com/LatticeAG/AxiContext.git
+cd AxiContext
+corepack enable
+pnpm install
+pnpm build
+(cd packages/cli && npm link)
 ```
 
-Or run the CLI without a global install:
-
-```bash
-npx @latticeag/axicontext init
-```
+That puts `axictx` on your `PATH`. To run it without a global link, use
+`pnpm --filter @latticeag/axicontext start -- <command>` from the repo
+checkout instead.
 
 Use it inside a repository:
 
@@ -56,7 +59,7 @@ axictx drift --ci --fail-on-drift
 
 ## Quickstart for contributors
 
-This repo uses Node.js 22 and pnpm.
+This repo uses Node.js 22 or newer (Node 24 works) and pnpm.
 
 ```bash
 corepack enable

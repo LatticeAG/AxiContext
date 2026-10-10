@@ -22,7 +22,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install -g @latticeag/axicontext
+      - name: Install axictx from source
+        run: |
+          git clone https://github.com/LatticeAG/AxiContext.git /tmp/axicontext
+          cd /tmp/axicontext
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+          (cd packages/cli && npm link)
       - run: axictx drift --ci --fail-on-drift
 ```
 

@@ -892,11 +892,13 @@ interface QueryResult {
 
 ### 16.2 Endpoints
 
-#### `GET /healthz`
+#### `GET /healthz` (alias: `GET /v1/health`)
 
 ```json
 { "status": "ok", "host": "127.0.0.1", "repo_path": "/abs/path" }
 ```
+
+Both health routes are unauthenticated, including when `serve.api_token` is set.
 
 #### `GET /v1/manifest`
 

@@ -1,21 +1,24 @@
 # Install
 
-AxiContext targets Node.js 22 or newer.
+AxiContext targets Node.js 22 or newer (Node 24 works).
 
-## Use from npm
+## Install from source
 
-After publish, install the CLI globally:
+The packages are not published to npm yet, so build the CLI from a clone:
 
 ```bash
-npm install -g @latticeag/axicontext
+git clone https://github.com/LatticeAG/AxiContext.git
+cd AxiContext
+corepack enable
+pnpm install
+pnpm build
+(cd packages/cli && npm link)
 axictx --help
 ```
 
-Or run it without a global install:
-
-```bash
-npx @latticeag/axicontext init
-```
+`npm link` inside `packages/cli` puts `axictx` on your `PATH`. To run it
+without a global link, use `pnpm --filter @latticeag/axicontext start --
+<command>` from the repo checkout.
 
 Then run it in the repository you want agents to understand:
 

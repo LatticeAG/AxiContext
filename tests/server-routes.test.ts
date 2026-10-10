@@ -89,6 +89,11 @@ describe("Agent Read API routes", () => {
     const health = await app.request("/healthz");
     expect(health.status).toBe(200);
 
+    const v1Health = await app.request("/v1/health");
+    expect(v1Health.status).toBe(200);
+    const v1HealthJson = await v1Health.json();
+    expect(v1HealthJson.status).toBe("ok");
+
     const manifest = await app.request("/v1/manifest");
     expect(manifest.status).toBe(200);
     const etag = manifest.headers.get("etag");
