@@ -1,6 +1,6 @@
 import path from "node:path";
 import { serve } from "@hono/node-server";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
   detectDrift,
@@ -53,6 +53,12 @@ function buildOpenApi(host: string, port: number) {
       "/healthz": {
         get: {
           summary: "Health check",
+          responses: { 200: { description: "OK" } }
+        }
+      },
+      "/v1/health": {
+        get: {
+          summary: "Health check (alias of /healthz under the v1 namespace)",
           responses: { 200: { description: "OK" } }
         }
       },
@@ -161,6 +167,19 @@ export function createAxiContextApp(options: {
   const app = new Hono();
   const openApi = buildOpenApi(options.host, options.port);
 
+  const healthResponse = (c: Context) => {
+    return c.json({
+      status: "ok",
+      host: options.host,
+      repo_path: options.repoPath
+    });
+  };
+
+  // Health endpoints stay unauthenticated on purpose, so /v1/health is
+  // registered before the /v1/* token middleware.
+  app.get("/healthz", healthResponse);
+  app.get("/v1/health", healthResponse);
+
   app.use("/v1/*", async (c, next) => {
     if (!options.apiToken) {
       await next();
@@ -172,14 +191,6 @@ export function createAxiContextApp(options: {
       throw new HTTPException(401, { message: "invalid api token" });
     }
     await next();
-  });
-
-  app.get("/healthz", (c) => {
-    return c.json({
-      status: "ok",
-      host: options.host,
-      repo_path: options.repoPath
-    });
   });
 
   app.get("/v1/manifest", async (c) => {
